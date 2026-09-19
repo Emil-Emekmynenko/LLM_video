@@ -7,6 +7,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from media_factory.config import Settings, get_settings
 from media_factory.domain.analysis import (
@@ -125,6 +126,8 @@ app = FastAPI(
     description="Prepare, validate, package, and deliver video assets.",
     lifespan=lifespan,
 )
+UI_DIR = Path(__file__).resolve().parents[1] / "ui"
+app.mount("/ui", StaticFiles(directory=UI_DIR), name="ui")
 
 
 def get_inspector(settings: Settings = Depends(get_settings)) -> FFprobeMediaInspector:
@@ -364,6 +367,11 @@ def live() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/", response_class=FileResponse, include_in_schema=False)
+def operator_console() -> FileResponse:
+    return FileResponse(UI_DIR / "index.html", media_type="text/html")
+
+
 @app.get("/api/v1/health/ready")
 def ready(
     inspector: FFprobeMediaInspector = Depends(get_inspector),
@@ -407,6 +415,17 @@ def upload_asset(
         ) from exc
 
 
+@app.get("/api/v1/assets/{asset_id}", response_model=StoredAsset)
+def get_asset(
+    asset_id: str,
+    database: Database = Depends(get_database),
+) -> StoredAsset:
+    try:
+        return SQLAlchemyAssetRepository(database.session_factory).get(asset_id)
+    except EntityNotFoundError as exc:
+        raise _not_found(exc) from exc
+
+
 @app.post("/api/v1/transcripts/validate", response_model=list[ValidationIssue])
 def validate_transcript_endpoint(transcript: Transcript) -> list[ValidationIssue]:
     return validate_transcript(transcript)
@@ -425,6 +444,11 @@ def create_package(
         return service.create(request.source_asset_id)
     except EntityNotFoundError as exc:
         raise _not_found(exc) from exc
+
+
+@app.get("/api/v1/packages", response_model=list[Package])
+def list_packages(service: PackageService = Depends(get_package_service)) -> list[Package]:
+    return service.list_packages()
 
 
 @app.get("/api/v1/packages/{package_id}", response_model=Package)
@@ -776,6 +800,19 @@ def get_job(job_id: str, service: JobService = Depends(get_job_service)) -> Job:
         raise _not_found(exc) from exc
 
 
+@app.get("/api/v1/packages/{package_id}/jobs", response_model=list[Job])
+def list_package_jobs(
+    package_id: str,
+    database: Database = Depends(get_database),
+    service: JobService = Depends(get_job_service),
+) -> list[Job]:
+    try:
+        SQLAlchemyPackageRepository(database.session_factory).get(package_id)
+        return service.list_for_package(package_id)
+    except EntityNotFoundError as exc:
+        raise _not_found(exc) from exc
+
+
 @app.get("/api/v1/analysis-runs/{run_id}", response_model=AnalysisRun)
 def get_analysis_run(
     run_id: str,
@@ -783,6 +820,22 @@ def get_analysis_run(
 ) -> AnalysisRun:
     try:
         return repository.get(run_id)
+    except EntityNotFoundError as exc:
+        raise _not_found(exc) from exc
+
+
+@app.get(
+    "/api/v1/packages/{package_id}/analysis-runs",
+    response_model=list[AnalysisRun],
+)
+def list_package_analysis_runs(
+    package_id: str,
+    database: Database = Depends(get_database),
+    repository: SQLAlchemyAnalysisRepository = Depends(get_analysis_repository),
+) -> list[AnalysisRun]:
+    try:
+        SQLAlchemyPackageRepository(database.session_factory).get(package_id)
+        return repository.list_runs(package_id)
     except EntityNotFoundError as exc:
         raise _not_found(exc) from exc
 

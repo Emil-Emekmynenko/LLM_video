@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from media_factory.api.app import app, get_job_service, get_package_service
+from media_factory.api.app import app, get_database, get_job_service, get_package_service
 from media_factory.domain.errors import IdempotencyConflictError, VersionConflictError
 from media_factory.domain.job import JobKind
 from media_factory.domain.models import StoredAsset
@@ -105,6 +105,7 @@ def test_package_and_job_api_flow(tmp_path: Path) -> None:
     job_service = JobService(SQLAlchemyJobRepository(database.session_factory), queue)
     app.dependency_overrides[get_package_service] = lambda: package_service
     app.dependency_overrides[get_job_service] = lambda: job_service
+    app.dependency_overrides[get_database] = lambda: database
 
     try:
         client = TestClient(app)
@@ -120,6 +121,9 @@ def test_package_and_job_api_flow(tmp_path: Path) -> None:
             json={"kind": "inspect_asset", "payload": {}},
         )
         fetched = client.get(f"/api/v1/jobs/{job.json()['id']}")
+        packages = client.get("/api/v1/packages")
+        asset_response = client.get(f"/api/v1/assets/{asset.id}")
+        jobs = client.get(f"/api/v1/packages/{package_id}/jobs")
     finally:
         app.dependency_overrides.clear()
 
@@ -129,3 +133,6 @@ def test_package_and_job_api_flow(tmp_path: Path) -> None:
     assert job.status_code == 202
     assert fetched.status_code == 200
     assert fetched.json()["id"] == job.json()["id"]
+    assert [item["id"] for item in packages.json()] == [package_id]
+    assert asset_response.json()["original_name"] == "video.mp4"
+    assert [item["id"] for item in jobs.json()] == [job.json()["id"]]

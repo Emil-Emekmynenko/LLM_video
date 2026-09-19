@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any, cast
 from uuid import uuid4
 
-from sqlalchemy import select, update
+from sqlalchemy import Select, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -68,6 +68,15 @@ class SQLAlchemyJobRepository:
             if row is None:
                 raise EntityNotFoundError("job", job_id)
             return self._to_domain(row)
+
+    def list_for_package(self, package_id: str) -> list[Job]:
+        statement: Select[tuple[JobRow]] = (
+            select(JobRow)
+            .where(JobRow.package_id == package_id)
+            .order_by(JobRow.created_at.desc())
+        )
+        with self.session_factory() as session:
+            return [self._to_domain(row) for row in session.scalars(statement)]
 
     def mark_dispatched(self, job_id: str) -> Job:
         return self._update(job_id, dispatched_at=utc_now())

@@ -37,6 +37,13 @@ class SQLAlchemyPackageRepository:
                 raise EntityNotFoundError("package", package_id)
             return self._to_domain(row)
 
+    def list_packages(self) -> list[Package]:
+        statement: Select[tuple[PackageRow]] = select(PackageRow).order_by(
+            PackageRow.updated_at.desc(), PackageRow.created_at.desc()
+        )
+        with self.session_factory() as session:
+            return [self._to_domain(row) for row in session.scalars(statement)]
+
     def transition(
         self,
         package_id: str,

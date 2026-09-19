@@ -110,6 +110,7 @@ def test_analysis_pipeline_persists_proxy_clips_and_results(tmp_path: Path) -> N
     clips = analyses.list_clips(run.id)
     events = analyses.list_events(run.id)
     completed_package = packages.get(package.id)
+    package_runs = analyses.list_runs(package.id)
 
     assert run.state is AnalysisRunState.SUCCEEDED
     assert run.source_sha256 == asset.sha256
@@ -124,3 +125,4 @@ def test_analysis_pipeline_persists_proxy_clips_and_results(tmp_path: Path) -> N
     assert events[1].start == 13
     assert events[1].source_clip_ids == [clips[1].id]
     assert completed_package.state is PackageState.AWAITING_METADATA_REVIEW
+    assert [item.id for item in package_runs] == [run.id]

@@ -73,9 +73,12 @@ class AnalysisService:
 
     def analyze(self, package_id: str) -> AnalysisRun:
         package = self.packages.get(package_id)
-        if package.state is not PackageState.READY_FOR_ANALYSIS:
+        if package.state not in {
+            PackageState.READY_FOR_ANALYSIS,
+            PackageState.ANALYSIS_FAILED,
+        }:
             raise InvalidAnalysisStateError(
-                "video analysis requires package state ready_for_analysis"
+                "video analysis requires package state ready_for_analysis or analysis_failed"
             )
         asset = self.assets.get(package.source_asset_id)
         if asset.inspection is None:

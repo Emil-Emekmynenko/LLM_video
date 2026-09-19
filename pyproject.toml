@@ -49,6 +49,9 @@ dev = [
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+media_factory = ["ui/*"]
+
 [tool.pytest.ini_options]
 addopts = "-q --disable-warnings --strict-markers"
 testpaths = ["tests"]

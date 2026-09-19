@@ -39,3 +39,5 @@ class JobService:
     def get(self, job_id: str) -> Job:
         return self.repository.get(job_id)
 
+    def list_for_package(self, package_id: str) -> list[Job]:
+        return self.repository.list_for_package(package_id)

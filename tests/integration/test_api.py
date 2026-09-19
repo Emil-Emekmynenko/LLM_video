@@ -48,6 +48,21 @@ def test_health_live() -> None:
     assert response.json() == {"status": "ok"}
 
 
+def test_operator_console_and_static_assets_are_served() -> None:
+    client = TestClient(app)
+
+    page = client.get("/")
+    stylesheet = client.get("/ui/app.css")
+    script = client.get("/ui/app.js")
+
+    assert page.status_code == 200
+    assert "Media Factory" in page.text
+    assert stylesheet.status_code == 200
+    assert "--accent" in stylesheet.text
+    assert script.status_code == 200
+    assert "loadPackages" in script.text
+
+
 def test_readiness_reports_each_dependency() -> None:
     inspector = FakeInspector()
     app.dependency_overrides[get_inspector] = lambda: inspector

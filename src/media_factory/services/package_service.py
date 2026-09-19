@@ -19,6 +19,9 @@ class PackageService:
     def get(self, package_id: str) -> Package:
         return self.repository.get(package_id)
 
+    def list_packages(self) -> list[Package]:
+        return self.repository.list_packages()
+
     def transition(
         self,
         package_id: str,

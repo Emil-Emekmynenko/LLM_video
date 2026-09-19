@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <title>Media Factory · Операторская</title>
+    <link rel="stylesheet" href="/ui/app.css">
+  </head>
+  <body>
+    <div class="ambient ambient-a"></div>
+    <div class="ambient ambient-b"></div>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Media Factory">
+        <span class="brand-mark">MF</span>
+        <span><strong>Media Factory</strong><small>operator console</small></span>
+      </a>
+      <div class="topbar-actions">
+        <a class="api-link" href="/docs" target="_blank" rel="noreferrer">API Docs ↗</a>
+        <div class="health" id="health"><span class="health-dot"></span><span>Проверка…</span></div>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Производственный контур</p>
+          <h1>Видео в готовый<br><span>медиакомплект.</span></h1>
+          <p class="hero-copy">Загрузка, анализ, проверка, упаковка и доставка — в одном наблюдаемом pipeline.</p>
+        </div>
+        <div class="stats" aria-label="Сводка">
+          <div><strong id="stat-total">—</strong><span>комплектов</span></div>
+          <div><strong id="stat-active">—</strong><span>в работе</span></div>
+          <div><strong id="stat-ready">—</strong><span>готово</span></div>
+        </div>
+      </section>
+
+      <section class="upload-card" id="drop-zone">
+        <div class="upload-icon" aria-hidden="true">↑</div>
+        <div class="upload-copy">
+          <h2>Новый исходник</h2>
+          <p>Перетащите MP4 сюда или выберите файл. SHA-256 и ffprobe-параметры будут сохранены автоматически.</p>
+        </div>
+        <input id="file-input" type="file" accept="video/mp4,.mp4" hidden>
+        <button class="button button-primary" id="choose-file" type="button">Выбрать MP4</button>
+        <div class="upload-progress" id="upload-progress" hidden><span></span></div>
+      </section>
+
+      <section class="workspace">
+        <aside class="package-panel">
+          <div class="section-heading">
+            <div><p class="eyebrow">Очередь</p><h2>Комплекты</h2></div>
+            <button class="icon-button" id="refresh" type="button" title="Обновить" aria-label="Обновить">↻</button>
+          </div>
+          <div class="filter-row">
+            <input id="search" type="search" placeholder="Поиск по ID или файлу…" aria-label="Поиск">
+          </div>
+          <div class="package-list" id="package-list" aria-live="polite"></div>
+        </aside>
+
+        <section class="detail-panel" id="detail-panel">
+          <div class="empty-state" id="empty-state">
+            <span>01</span><h2>Выберите комплект</h2><p>Здесь появятся технические данные, ход обработки и доступные действия.</p>
+          </div>
+          <div id="package-detail" hidden>
+            <div class="detail-head">
+              <div>
+                <p class="eyebrow" id="detail-kicker">Комплект</p>
+                <h2 id="detail-title">—</h2>
+                <code id="detail-id">—</code>
+              </div>
+              <div class="detail-actions" id="detail-actions"></div>
+            </div>
+
+            <div class="pipeline" id="pipeline" aria-label="Этапы pipeline"></div>
+
+            <div class="detail-grid">
+              <article class="info-card">
+                <div class="card-title"><h3>Исходник</h3><span id="asset-badge" class="badge">—</span></div>
+                <dl id="asset-facts"></dl>
+              </article>
+              <article class="info-card">
+                <div class="card-title"><h3>Последний job</h3><span id="job-badge" class="badge">—</span></div>
+                <div id="job-summary" class="job-summary"></div>
+              </article>
+            </div>
+
+            <article class="info-card history-card">
+              <div class="card-title"><h3>История обработки</h3><span id="history-count" class="muted"></span></div>
+              <div class="history" id="history"></div>
+            </article>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+    <script src="/ui/app.js" defer></script>
+  </body>
+</html>

@@ -118,6 +118,15 @@ class SQLAlchemyAnalysisRepository:
                 raise EntityNotFoundError("analysis_run", run_id)
             return self._run_to_domain(row)
 
+    def list_runs(self, package_id: str) -> list[AnalysisRun]:
+        statement: Select[tuple[AnalysisRunRow]] = (
+            select(AnalysisRunRow)
+            .where(AnalysisRunRow.package_id == package_id)
+            .order_by(AnalysisRunRow.created_at.desc())
+        )
+        with self.session_factory() as session:
+            return [self._run_to_domain(row) for row in session.scalars(statement)]
+
     def list_clips(self, run_id: str) -> list[AnalysisClip]:
         statement: Select[tuple[AnalysisClipRow]] = (
             select(AnalysisClipRow)
