@@ -7,6 +7,7 @@ from media_factory.config import get_settings
 from media_factory.persistence.database import Base
 from media_factory.persistence.tables import (  # noqa: F401
     AnalysisClipRow,
+    AnalysisEventRow,
     AnalysisRunRow,
     AssetRow,
     JobRow,

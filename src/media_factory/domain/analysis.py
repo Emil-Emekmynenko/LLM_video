@@ -10,6 +10,13 @@ class AnalysisRunState(StrEnum):
     FAILED = "failed"
 
 
+class ReviewStatus(StrEnum):
+    PENDING = "pending"
+    NEEDS_REVIEW = "needs_review"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
 class ClipInterval(BaseModel):
     start: float = Field(ge=0)
     end: float = Field(gt=0)
@@ -28,10 +35,10 @@ class ClipInterval(BaseModel):
 class DetectedEvent(BaseModel):
     relative_start: float = Field(ge=0)
     relative_end: float = Field(ge=0)
-    actor: str
-    action: str
+    actor: str = Field(min_length=1)
+    action: str = Field(min_length=1)
     objects: list[str] = Field(default_factory=list)
-    evidence: str
+    evidence: str = Field(min_length=1)
     confidence: float = Field(ge=0, le=1)
 
     @model_validator(mode="after")
@@ -41,11 +48,19 @@ class DetectedEvent(BaseModel):
         return self
 
 
+class SuggestedChapter(BaseModel):
+    relative_start: float = Field(ge=0)
+    title: str = Field(min_length=1)
+    evidence: str = Field(min_length=1)
+    confidence: float = Field(ge=0, le=1)
+
+
 class ClipAnalysis(BaseModel):
-    summary: str
+    summary: str = Field(min_length=1)
     participants: list[str] = Field(default_factory=list)
     objects: list[str] = Field(default_factory=list)
     events: list[DetectedEvent] = Field(default_factory=list)
+    suggested_chapters: list[SuggestedChapter] = Field(default_factory=list)
     uncertainty: str | None = None
 
 
@@ -55,7 +70,30 @@ class AnalysisClip(BaseModel):
     interval: ClipInterval
     clip_path: str
     result: ClipAnalysis
+    inference_seconds: float | None = None
     created_at: datetime
+
+
+class TimelineEvent(BaseModel):
+    id: str
+    analysis_run_id: str
+    start: float = Field(ge=0)
+    end: float = Field(ge=0)
+    actor: str
+    action: str
+    objects: list[str] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)
+    confidence: float = Field(ge=0, le=1)
+    source_clip_ids: list[str] = Field(default_factory=list)
+    conflict_event_ids: list[str] = Field(default_factory=list)
+    review_status: ReviewStatus = ReviewStatus.PENDING
+    created_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_order(self) -> "TimelineEvent":
+        if self.end < self.start:
+            raise ValueError("event end must not be before start")
+        return self
 
 
 class AnalysisRun(BaseModel):
@@ -66,9 +104,11 @@ class AnalysisRun(BaseModel):
     provider_name: str
     provider_version: str
     prompt_version: str
+    inference_parameters: dict[str, str | int | float | bool | None] = Field(
+        default_factory=dict
+    )
     proxy_path: str | None = None
     error_code: str | None = None
     error_message: str | None = None
     created_at: datetime
     finished_at: datetime | None = None
-

@@ -113,6 +113,9 @@ class AnalysisRunRow(Base):
     provider_name: Mapped[str] = mapped_column(String(120), nullable=False)
     provider_version: Mapped[str] = mapped_column(String(80), nullable=False)
     prompt_version: Mapped[str] = mapped_column(String(80), nullable=False)
+    inference_parameters: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
     proxy_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     processing_manifest: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
@@ -140,6 +143,34 @@ class AnalysisClipRow(Base):
     clip_path: Mapped[str] = mapped_column(Text, nullable=False)
     extraction_command: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     result: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    inference_seconds: Mapped[float | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        nullable=False,
+    )
+
+
+class AnalysisEventRow(Base):
+    __tablename__ = "analysis_events"
+    __table_args__ = (Index("ix_analysis_events_run_id", "analysis_run_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    analysis_run_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("analysis_runs.id"),
+        nullable=False,
+    )
+    start_seconds: Mapped[float] = mapped_column(nullable=False)
+    end_seconds: Mapped[float] = mapped_column(nullable=False)
+    actor: Mapped[str] = mapped_column(Text, nullable=False)
+    action: Mapped[str] = mapped_column(Text, nullable=False)
+    objects: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    evidence: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    confidence: Mapped[float] = mapped_column(nullable=False)
+    source_clip_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    conflict_event_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    review_status: Mapped[str] = mapped_column(String(20), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=utc_now,

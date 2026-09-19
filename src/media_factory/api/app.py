@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile, status
 
 from media_factory.config import Settings, get_settings
-from media_factory.domain.analysis import AnalysisClip, AnalysisRun
+from media_factory.domain.analysis import AnalysisClip, AnalysisRun, TimelineEvent
 from media_factory.domain.errors import (
     EntityNotFoundError,
     IdempotencyConflictError,
@@ -267,6 +267,18 @@ def list_analysis_clips(
     try:
         repository.get(run_id)
         return repository.list_clips(run_id)
+    except EntityNotFoundError as exc:
+        raise _not_found(exc) from exc
+
+
+@app.get("/api/v1/analysis-runs/{run_id}/events", response_model=list[TimelineEvent])
+def list_analysis_events(
+    run_id: str,
+    repository: SQLAlchemyAnalysisRepository = Depends(get_analysis_repository),
+) -> list[TimelineEvent]:
+    try:
+        repository.get(run_id)
+        return repository.list_events(run_id)
     except EntityNotFoundError as exc:
         raise _not_found(exc) from exc
 

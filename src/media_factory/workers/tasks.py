@@ -6,7 +6,11 @@ from media_factory.persistence.asset_repository import SQLAlchemyAssetRepository
 from media_factory.persistence.database import Database
 from media_factory.persistence.job_repository import SQLAlchemyJobRepository
 from media_factory.persistence.package_repository import SQLAlchemyPackageRepository
-from media_factory.providers.video_understanding import FakeVideoUnderstandingProvider
+from media_factory.providers.video_understanding import (
+    FakeVideoUnderstandingProvider,
+    QwenOpenAICompatibleProvider,
+    VideoUnderstandingProvider,
+)
 from media_factory.services.analysis_service import AnalysisService
 from media_factory.services.media_inspector import FFprobeMediaInspector, MediaInspectionError
 from media_factory.services.scene_detection import PySceneDetector
@@ -74,10 +78,7 @@ def _execute_analysis(
     assets: SQLAlchemyAssetRepository,
     package_id: str,
 ) -> None:
-    if settings.vlm_provider != "fake" or not settings.allow_fake_vlm:
-        raise RuntimeError("Configured VLM provider is not available")
-    if settings.environment != "development":
-        raise RuntimeError("Fake VLM provider is forbidden outside development")
+    provider = _build_vlm_provider(settings)
     service = AnalysisService(
         packages=packages,
         assets=assets,
@@ -85,10 +86,31 @@ def _execute_analysis(
         proxy_generator=FFmpegProxyGenerator(ffmpeg_bin=settings.ffmpeg_bin),
         clip_extractor=FFmpegClipExtractor(ffmpeg_bin=settings.ffmpeg_bin),
         scene_detector=PySceneDetector(),
-        provider=FakeVideoUnderstandingProvider(),
+        provider=provider,
         proxy_dir=settings.proxy_dir,
         clip_dir=settings.clip_dir,
         max_clip_duration=settings.max_clip_duration,
         clip_overlap=settings.clip_overlap,
     )
     service.analyze(package_id)
+
+
+def _build_vlm_provider(settings: Settings) -> VideoUnderstandingProvider:
+    if settings.vlm_provider == "fake":
+        if not settings.allow_fake_vlm:
+            raise RuntimeError("Fake VLM provider is disabled")
+        if settings.environment != "development":
+            raise RuntimeError("Fake VLM provider is forbidden outside development")
+        return FakeVideoUnderstandingProvider()
+    if settings.vlm_provider == "qwen":
+        return QwenOpenAICompatibleProvider(
+            base_url=settings.qwen_base_url,
+            api_key=settings.qwen_api_key.get_secret_value(),
+            model=settings.qwen_model,
+            model_revision=settings.qwen_model_revision,
+            timeout_seconds=settings.qwen_timeout_seconds,
+            max_retries=settings.qwen_max_retries,
+            temperature=settings.qwen_temperature,
+            max_tokens=settings.qwen_max_tokens,
+        )
+    raise RuntimeError(f"Unsupported VLM provider: {settings.vlm_provider}")

@@ -17,6 +17,8 @@
 - внутренний proxy без изменения мастер-файла;
 - определение сцен и нарезка перекрывающихся клипов;
 - заменяемый VLM provider и сохраняемые analysis runs;
+- локальный Qwen3-VL через OpenAI-совместимый endpoint;
+- единая временная шкала с дедупликацией, provenance и конфликтами;
 
 ## Требования
 
@@ -65,6 +67,32 @@ curl -X POST http://127.0.0.1:8000/api/v1/packages/<package-id>/jobs \
 ```
 
 Если `ffprobe` не установлен, `live` остаётся успешным, но `ready` возвращает состояние `not_ready`, а попытка инспекции завершается объяснимой ошибкой зависимости.
+
+## Локальный Qwen3-VL
+
+Модель запускается отдельным GPU-процессом, например через vLLM:
+
+```bash
+vllm serve Qwen/Qwen3-VL-8B-Instruct \
+  --revision e0a319f4d147b3916275a053b0583ca82f351e90 \
+  --port 8001 \
+  --max-model-len 32768
+```
+
+В `.env` переключите worker с тестового провайдера на реальный:
+
+```dotenv
+MEDIA_FACTORY_VLM_PROVIDER=qwen
+MEDIA_FACTORY_ALLOW_FAKE_VLM=false
+MEDIA_FACTORY_QWEN_BASE_URL=http://localhost:8001/v1
+MEDIA_FACTORY_QWEN_MODEL=Qwen/Qwen3-VL-8B-Instruct
+MEDIA_FACTORY_QWEN_MODEL_REVISION=e0a319f4d147b3916275a053b0583ca82f351e90
+```
+
+После задания `analyze_video` клипы доступны по
+`GET /api/v1/analysis-runs/{run_id}/clips`, а объединённые события — по
+`GET /api/v1/analysis-runs/{run_id}/events`. Веса модели и пользовательские
+видео в Git не добавляются.
 
 ## Тесты
 

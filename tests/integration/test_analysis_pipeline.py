@@ -1,13 +1,17 @@
 from pathlib import Path
 
-from media_factory.domain.analysis import AnalysisRunState, ClipInterval
+from media_factory.domain.analysis import (
+    AnalysisRunState,
+    ClipAnalysis,
+    ClipInterval,
+    DetectedEvent,
+)
 from media_factory.domain.models import MediaInspection, StoredAsset, StreamInfo
 from media_factory.domain.package_state import PackageState
 from media_factory.persistence.analysis_repository import SQLAlchemyAnalysisRepository
 from media_factory.persistence.asset_repository import SQLAlchemyAssetRepository
 from media_factory.persistence.database import Database
 from media_factory.persistence.package_repository import SQLAlchemyPackageRepository
-from media_factory.providers.video_understanding import FakeVideoUnderstandingProvider
 from media_factory.services.analysis_service import AnalysisService
 from media_factory.services.scene_detection import WholeVideoSceneDetector
 
@@ -29,6 +33,32 @@ class FakeClipExtractor:
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.touch()
         return ["fake-ffmpeg", str(source), str(interval.start), str(destination)]
+
+
+class ObservedEventProvider:
+    name = "test-vlm"
+    version = "test-revision"
+    prompt_version = "test-prompt"
+    inference_parameters: dict[str, str | int | float | bool | None] = {
+        "temperature": 0
+    }
+
+    def analyze_clip(self, clip_path: Path, interval: ClipInterval) -> ClipAnalysis:
+        del clip_path, interval
+        return ClipAnalysis(
+            summary="A person picks up a tool.",
+            events=[
+                DetectedEvent(
+                    relative_start=0,
+                    relative_end=1,
+                    actor="person_1",
+                    action="picks_up_object",
+                    objects=["tool"],
+                    evidence="The hand lifts the tool.",
+                    confidence=0.9,
+                )
+            ],
+        )
 
 
 def test_analysis_pipeline_persists_proxy_clips_and_results(tmp_path: Path) -> None:
@@ -69,7 +99,7 @@ def test_analysis_pipeline_persists_proxy_clips_and_results(tmp_path: Path) -> N
         proxy_generator=FakeProxyGenerator(),
         clip_extractor=FakeClipExtractor(),
         scene_detector=WholeVideoSceneDetector(),
-        provider=FakeVideoUnderstandingProvider(),
+        provider=ObservedEventProvider(),
         proxy_dir=tmp_path / "proxies",
         clip_dir=tmp_path / "clips",
         max_clip_duration=15,
@@ -78,6 +108,7 @@ def test_analysis_pipeline_persists_proxy_clips_and_results(tmp_path: Path) -> N
 
     run = service.analyze(package.id)
     clips = analyses.list_clips(run.id)
+    events = analyses.list_events(run.id)
     completed_package = packages.get(package.id)
 
     assert run.state is AnalysisRunState.SUCCEEDED
@@ -87,6 +118,9 @@ def test_analysis_pipeline_persists_proxy_clips_and_results(tmp_path: Path) -> N
     assert clips[0].interval == ClipInterval(start=0, end=15)
     assert clips[1].interval == ClipInterval(start=13, end=28)
     assert clips[2].interval == ClipInterval(start=26, end=32)
-    assert clips[0].result.uncertainty is not None
+    assert clips[0].inference_seconds is not None
+    assert run.inference_parameters == {"temperature": 0}
+    assert len(events) == 3
+    assert events[1].start == 13
+    assert events[1].source_clip_ids == [clips[1].id]
     assert completed_package.state is PackageState.AWAITING_METADATA_REVIEW
-

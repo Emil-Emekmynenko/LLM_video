@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -27,6 +27,14 @@ class Settings(BaseSettings):
     clip_overlap: float = 2.0
     vlm_provider: str = "fake"
     allow_fake_vlm: bool = True
+    qwen_base_url: str = "http://localhost:8001/v1"
+    qwen_api_key: SecretStr = SecretStr("EMPTY")
+    qwen_model: str = "Qwen/Qwen3-VL-8B-Instruct"
+    qwen_model_revision: str = "e0a319f4d147b3916275a053b0583ca82f351e90"
+    qwen_timeout_seconds: float = Field(default=600.0, gt=0)
+    qwen_max_retries: int = Field(default=2, ge=0, le=5)
+    qwen_temperature: float = Field(default=0.1, ge=0, le=2)
+    qwen_max_tokens: int = Field(default=2048, gt=0)
 
 
 @lru_cache(maxsize=1)

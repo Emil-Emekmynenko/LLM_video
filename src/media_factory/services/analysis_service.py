@@ -1,13 +1,15 @@
 from collections.abc import Sequence
 from pathlib import Path
+from time import perf_counter
 from typing import Protocol
 
-from media_factory.domain.analysis import AnalysisRun, ClipInterval
+from media_factory.domain.analysis import AnalysisClip, AnalysisRun, ClipInterval
 from media_factory.domain.package_state import PackageState
 from media_factory.persistence.analysis_repository import SQLAlchemyAnalysisRepository
 from media_factory.persistence.asset_repository import SQLAlchemyAssetRepository
 from media_factory.persistence.package_repository import SQLAlchemyPackageRepository
 from media_factory.providers.video_understanding import VideoUnderstandingProvider
+from media_factory.services.event_timeline import merge_clip_events
 from media_factory.services.scene_detection import SceneDetector
 from media_factory.services.video_processing import split_scene_intervals
 
@@ -90,6 +92,7 @@ class AnalysisService:
             provider_name=self.provider.name,
             provider_version=self.provider.version,
             prompt_version=self.provider.prompt_version,
+            inference_parameters=self.provider.inference_parameters,
         )
 
         try:
@@ -102,6 +105,7 @@ class AnalysisService:
                 max_duration=self.max_clip_duration,
                 overlap=self.clip_overlap,
             )
+            analyzed_clips: list[AnalysisClip] = []
             for index, interval in enumerate(intervals, start=1):
                 clip_path = self.clip_dir / package.id / run.id / f"clip-{index:04d}.mp4"
                 extraction_command = self.clip_extractor.extract(
@@ -109,15 +113,22 @@ class AnalysisService:
                     clip_path,
                     interval,
                 )
+                inference_started = perf_counter()
                 result = self.provider.analyze_clip(clip_path, interval)
+                inference_seconds = perf_counter() - inference_started
                 self._validate_provider_result(interval, result.events)
-                self.analyses.add_clip(
-                    run_id=run.id,
-                    interval=interval,
-                    clip_path=clip_path,
-                    extraction_command=extraction_command,
-                    result=result,
+                self._validate_chapters(interval, result.suggested_chapters)
+                analyzed_clips.append(
+                    self.analyses.add_clip(
+                        run_id=run.id,
+                        interval=interval,
+                        clip_path=clip_path,
+                        extraction_command=extraction_command,
+                        result=result,
+                        inference_seconds=inference_seconds,
+                    )
                 )
+            self.analyses.save_events(merge_clip_events(run.id, analyzed_clips))
             run = self.analyses.succeed(run.id)
             self.packages.transition(
                 package.id,
@@ -143,7 +154,20 @@ class AnalysisService:
             if (
                 not isinstance(relative_start, (int, float))
                 or not isinstance(relative_end, (int, float))
+                or relative_start < 0
+                or relative_end < relative_start
                 or relative_start > interval.duration
                 or relative_end > interval.duration
             ):
                 raise InvalidProviderOutputError("event timestamps exceed clip duration")
+
+    @staticmethod
+    def _validate_chapters(interval: ClipInterval, chapters: Sequence[object]) -> None:
+        for chapter in chapters:
+            relative_start = getattr(chapter, "relative_start", None)
+            if (
+                not isinstance(relative_start, (int, float))
+                or relative_start < 0
+                or relative_start > interval.duration
+            ):
+                raise InvalidProviderOutputError("chapter timestamp exceeds clip duration")
