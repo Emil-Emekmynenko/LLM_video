@@ -1,5 +1,6 @@
 import json
 import re
+import unicodedata
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -13,6 +14,31 @@ def safe_package_base_name(package_id: str) -> str:
     if not SAFE_BASE_NAME.fullmatch(candidate):
         raise UnsafePackagePath("package id cannot form a safe base name")
     return candidate
+
+
+def semantic_package_base_name(category: str, title: str, package_id: str) -> str:
+    category_part = _ascii_slug(category)
+    title_part = _ascii_slug(title)
+    candidate = "_".join(part for part in (category_part, title_part) if part)[:200]
+    if not candidate:
+        return safe_package_base_name(package_id)
+    candidate = candidate.rstrip("_-")
+    if not SAFE_BASE_NAME.fullmatch(candidate):
+        raise UnsafePackagePath("metadata cannot form a safe base name")
+    return candidate
+
+
+def ordered_metadata(payload: dict[str, Any], key_order: list[str]) -> dict[str, Any]:
+    missing = [key for key in key_order if key not in payload]
+    extra = [key for key in payload if key not in key_order]
+    if missing or extra:
+        raise ValueError(f"metadata keys do not match schema: missing={missing}, extra={extra}")
+    return {key: payload[key] for key in key_order}
+
+
+def _ascii_slug(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode()
+    return re.sub(r"_+", "_", re.sub(r"[^A-Za-z0-9]+", "_", normalized)).strip("_")
 
 
 def ensure_safe_relative_path(value: str) -> None:

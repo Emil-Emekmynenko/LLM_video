@@ -287,6 +287,7 @@ def _execute_package_build(
         customer=settings.default_customer,
         schema_version=settings.default_customer_schema_version,
         duration_tolerance=settings.transcript_duration_tolerance,
+        schema_dir=settings.customer_schema_dir,
     )
     service.build(package_id)
 

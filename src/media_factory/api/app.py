@@ -38,6 +38,7 @@ from media_factory.domain.analysis import (
     TimelineEvent,
 )
 from media_factory.domain.audit import AuditEvent, Principal
+from media_factory.domain.customer_schema import CustomerSchema
 from media_factory.domain.delivery import (
     DeliveryAttempt,
     DeliveryCreateRequest,
@@ -104,6 +105,7 @@ from media_factory.providers.storage_factory import (
 from media_factory.services.analysis_review import AnalysisReviewError, AnalysisReviewService
 from media_factory.services.asset_ingest import AssetIngestService
 from media_factory.services.checksum import UploadTooLarge
+from media_factory.services.customer_schema_service import load_customer_schema
 from media_factory.services.delivery_service import DeliveryService, DeliveryWorkflowError
 from media_factory.services.export_service import ExportWorkflowError, LocalExportService
 from media_factory.services.job_queue import RedisJobQueue
@@ -310,6 +312,14 @@ def get_audit_repository(
     return SQLAlchemyAuditRepository(database.session_factory)
 
 
+def get_customer_schema(settings: Settings = Depends(get_settings)) -> CustomerSchema:
+    return load_customer_schema(
+        settings.default_customer,
+        settings.default_customer_schema_version,
+        schema_dir=settings.customer_schema_dir,
+    )
+
+
 def get_metadata_repository(
     database: Database = Depends(get_database),
 ) -> SQLAlchemyMetadataRepository:
@@ -433,6 +443,7 @@ def get_packaging_service(
         customer=settings.default_customer,
         schema_version=settings.default_customer_schema_version,
         duration_tolerance=settings.transcript_duration_tolerance,
+        schema_dir=settings.customer_schema_dir,
     )
 
 
@@ -535,6 +546,13 @@ def ready(
 @app.get("/api/v1/auth/me", response_model=Principal)
 def current_principal() -> Principal:
     return get_request_context().principal
+
+
+@app.get("/api/v1/customer-schemas", response_model=list[CustomerSchema])
+def list_customer_schemas(
+    schema: CustomerSchema = Depends(get_customer_schema),
+) -> list[CustomerSchema]:
+    return [schema]
 
 
 @app.get("/api/v1/audit-events", response_model=list[AuditEvent])

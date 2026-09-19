@@ -1,0 +1,31 @@
+{
+  "customer": "internal",
+  "version": "1.0",
+  "metadata_key_order": [
+    "Title",
+    "Description",
+    "Publication Date",
+    "Category",
+    "Duration",
+    "Language",
+    "Resolution",
+    "WPM"
+  ],
+  "required_files": ["master", "transcript", "metadata", "manifest"],
+  "allowed_extensions": [".mp4"],
+  "category_codes": [
+    "Repairs_And_DIY",
+    "Cooking",
+    "Arts_And_Crafts",
+    "Technology",
+    "Nature",
+    "Sports_And_Fitness",
+    "Other"
+  ],
+  "allowed_audio_policies": ["preserve", "remove", "replace"],
+  "allow_synthetic_voice": true,
+  "require_chapters": false,
+  "include_manifest_in_delivery": true,
+  "base_name_template": "{category}_{title}",
+  "transcript_duration_tolerance": 0.5
+}

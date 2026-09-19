@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_prefix="MEDIA_FACTORY_",
+        env_ignore_empty=True,
         extra="ignore",
     )
 
@@ -55,6 +56,7 @@ class Settings(BaseSettings):
     package_dir: Path = Path("data/packages")
     default_customer: str = "internal"
     default_customer_schema_version: str = "1.0"
+    customer_schema_dir: Path | None = None
     export_dir: Path = Path("data/exports")
     export_chunk_size: int = Field(default=1024 * 1024, ge=64 * 1024)
     delivery_provider: str = "filesystem"

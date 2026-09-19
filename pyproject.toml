@@ -50,7 +50,7 @@ dev = [
 where = ["src"]
 
 [tool.setuptools.package-data]
-media_factory = ["ui/*"]
+media_factory = ["ui/*", "schemas/**/*.json"]
 
 [tool.pytest.ini_options]
 addopts = "-q --disable-warnings --strict-markers"

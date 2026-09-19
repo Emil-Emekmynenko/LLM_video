@@ -1,8 +1,10 @@
 import shutil
+from hashlib import sha256
 from pathlib import Path
 from typing import Protocol
 
 from media_factory.domain.analysis import AnalysisReviewStatus
+from media_factory.domain.customer_schema import CustomerSchema
 from media_factory.domain.metadata import MetadataStatus
 from media_factory.domain.models import Severity, Transcript, ValidationIssue
 from media_factory.domain.package_state import PackageState
@@ -24,10 +26,13 @@ from media_factory.persistence.transcription_repository import (
     SQLAlchemyTranscriptionRepository,
 )
 from media_factory.services.checksum import sha256_file
+from media_factory.services.customer_schema_service import load_customer_schema
 from media_factory.services.package_artifacts import (
     calculate_wpm,
+    deterministic_json_bytes,
     ensure_safe_relative_path,
-    safe_package_base_name,
+    ordered_metadata,
+    semantic_package_base_name,
     write_deterministic_json,
 )
 from media_factory.services.transcript_validator import validate_transcript
@@ -66,6 +71,7 @@ class PackagingService:
         customer: str,
         schema_version: str,
         duration_tolerance: float,
+        schema_dir: Path | None = None,
     ) -> None:
         self.packages = packages
         self.assets = assets
@@ -77,9 +83,16 @@ class PackagingService:
         self.builds = builds
         self.decoder = decoder
         self.package_dir = package_dir
-        self.customer = customer
-        self.schema_version = schema_version
-        self.duration_tolerance = duration_tolerance
+        self.schema: CustomerSchema = load_customer_schema(
+            customer, schema_version, schema_dir=schema_dir
+        )
+        self.customer = self.schema.customer
+        self.schema_version = self.schema.version
+        self.duration_tolerance = self.schema.transcript_duration_tolerance
+        self.configured_duration_tolerance = duration_tolerance
+        self.schema_sha256 = sha256(
+            deterministic_json_bytes(self.schema.model_dump(mode="json"))
+        ).hexdigest()
 
     def validate_request(self, package_id: str) -> None:
         package = self.packages.get(package_id)
@@ -104,7 +117,11 @@ class PackagingService:
         analysis = self.analyses.get(approved_metadata.analysis_run_id)
         source = self.assets.get(package.source_asset_id)
         audio_decision = self.narration.get_latest_audio_decision(package.id)
-        base_name = safe_package_base_name(package.id)
+        base_name = semantic_package_base_name(
+            approved_metadata.category,
+            approved_metadata.title,
+            package.id,
+        )
         build = self.builds.create(
             package_id=package.id,
             master_build_id=master.id,
@@ -117,6 +134,7 @@ class PackagingService:
             build_parameters={
                 "wpm_algorithm": "full_duration_v1",
                 "duration_tolerance": self.duration_tolerance,
+                "customer_schema_sha256": self.schema_sha256,
             },
         )
         output_dir = self.package_dir / package.id / f"v{build.version:04d}"
@@ -133,7 +151,7 @@ class PackagingService:
             transcript = transcription.transcript
             video = master.inspection.video_streams[0] if master.inspection.video_streams else None
             resolution = f"{video.width}x{video.height}" if video else "unknown"
-            delivery_metadata = DeliveryMetadata.model_validate(
+            metadata_payload = ordered_metadata(
                 {
                     "Title": approved_metadata.title,
                     "Description": approved_metadata.description,
@@ -143,10 +161,12 @@ class PackagingService:
                     "Language": transcript.language,
                     "Resolution": resolution,
                     "WPM": calculate_wpm(transcript),
-                }
+                },
+                list(self.schema.metadata_key_order),
             )
-            transcript_name = f"{base_name}.transcript.json"
-            metadata_name = f"{base_name}.metadata.json"
+            delivery_metadata = DeliveryMetadata.model_validate(metadata_payload)
+            transcript_name = f"{base_name}_transcript.json"
+            metadata_name = f"{base_name}_metadata.json"
             master_name = f"{base_name}{Path(master.output_path).suffix.lower()}"
             packaged_master_path = staging_dir / master_name
             transcript_path = staging_dir / transcript_name
@@ -158,7 +178,7 @@ class PackagingService:
             )
             write_deterministic_json(
                 metadata_path,
-                delivery_metadata.model_dump(mode="json", by_alias=True),
+                metadata_payload,
             )
             files = self._file_entries(
                 master_path=packaged_master_path,
@@ -177,14 +197,23 @@ class PackagingService:
                 transcript_master_sha256=transcription.master_sha256,
                 transcript=transcript,
                 metadata_status=approved_metadata.status,
+                metadata_category=approved_metadata.category,
+                has_chapters=bool(approved_metadata.chapters),
                 analysis_review_status=analysis.review_status,
                 latest_audio_decision_id=audio_decision.id,
+                audio_policy=audio_decision.policy.value,
+                synthetic_audio=(
+                    self.narration.get_audio_track(audio_decision.audio_track_id).synthetic
+                    if audio_decision.audio_track_id is not None
+                    else False
+                ),
                 source_duplicate_of=source.duplicate_of,
                 resolution=resolution,
+                base_name=base_name,
                 files=files,
             )
             blocking = [issue for issue in issues if issue.blocking]
-            manifest_name = f"{base_name}.manifest.json"
+            manifest_name = f"{base_name}_manifest.json"
             manifest_path = staging_dir / manifest_name
             manifest = {
                 "schema_version": "1.0",
@@ -193,6 +222,7 @@ class PackagingService:
                 "build_version": build.version,
                 "customer": self.customer,
                 "customer_schema_version": self.schema_version,
+                "customer_schema_sha256": self.schema_sha256,
                 "base_name": base_name,
                 "master_build_id": master.id,
                 "master_sha256": master.output_sha256,
@@ -324,10 +354,15 @@ class PackagingService:
         transcript_master_sha256: str,
         transcript: Transcript,
         metadata_status: MetadataStatus,
+        metadata_category: str | None = None,
+        has_chapters: bool = True,
         analysis_review_status: AnalysisReviewStatus,
         latest_audio_decision_id: str,
+        audio_policy: str = "preserve",
+        synthetic_audio: bool = False,
         source_duplicate_of: str | None,
         resolution: str,
+        base_name: str | None = None,
         files: list[PackageFile],
     ) -> list[ValidationIssue]:
         issues = validate_transcript(
@@ -368,7 +403,8 @@ class PackagingService:
                 ensure_safe_relative_path(item.target_relative_path)
             except ValueError as exc:
                 issues.append(_issue("unsafe_package_path", f"files.{item.role}", str(exc)))
-            if not item.filename.startswith(f"{files[0].filename.split('.')[0]}."):
+            expected_base = base_name or files[0].filename.rsplit(".", 1)[0]
+            if not item.filename.startswith(expected_base):
                 issues.append(
                     _issue(
                         "base_name_mismatch",
@@ -388,6 +424,22 @@ class PackagingService:
             issues.append(
                 _issue("metadata_not_approved", "metadata", "Метаданные не утверждены оператором.")
             )
+        if metadata_category is not None and metadata_category not in self.schema.category_codes:
+            issues.append(
+                _issue(
+                    "category_not_allowed",
+                    "metadata.Category",
+                    "Категория не разрешена схемой заказчика.",
+                )
+            )
+        if self.schema.require_chapters and not has_chapters:
+            issues.append(
+                _issue(
+                    "chapters_required",
+                    "metadata.chapters",
+                    "Схема заказчика требует хотя бы одну главу.",
+                )
+            )
         if analysis_review_status is not AnalysisReviewStatus.APPROVED:
             issues.append(
                 _issue("analysis_not_approved", "analysis", "Анализ не утверждён оператором.")
@@ -398,6 +450,30 @@ class PackagingService:
                     "audio_policy_mismatch",
                     "master.audio_decision_id",
                     "Мастер собран не с последней аудиополитикой.",
+                )
+            )
+        if audio_policy not in {value.value for value in self.schema.allowed_audio_policies}:
+            issues.append(
+                _issue(
+                    "audio_policy_not_allowed",
+                    "audio.policy",
+                    "Выбранная аудиополитика запрещена схемой заказчика.",
+                )
+            )
+        if synthetic_audio and not self.schema.allow_synthetic_voice:
+            issues.append(
+                _issue(
+                    "synthetic_voice_not_allowed",
+                    "audio.synthetic",
+                    "Синтетический голос запрещён схемой заказчика.",
+                )
+            )
+        if master_path.suffix.lower() not in self.schema.allowed_extensions:
+            issues.append(
+                _issue(
+                    "container_not_allowed",
+                    "master.container",
+                    "Контейнер мастер-файла запрещён схемой заказчика.",
                 )
             )
         if source_duplicate_of is not None:

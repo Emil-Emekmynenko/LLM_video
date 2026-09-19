@@ -58,6 +58,16 @@ def test_local_mode_exposes_admin_principal() -> None:
     assert response.json() == {"actor": "local-admin", "role": "admin"}
 
 
+def test_current_customer_schema_is_exposed() -> None:
+    client = TestClient(app)
+
+    response = client.get("/api/v1/customer-schemas")
+
+    assert response.status_code == 200
+    assert response.json()[0]["customer"] == "internal"
+    assert response.json()[0]["version"] == "1.0"
+
+
 def test_operator_console_and_static_assets_are_served() -> None:
     client = TestClient(app)
 
