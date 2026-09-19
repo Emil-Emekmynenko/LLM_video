@@ -19,6 +19,7 @@ from media_factory.domain.errors import (
     VersionConflictError,
 )
 from media_factory.domain.job import Job, JobCreate, JobKind
+from media_factory.domain.master import MasterBuild
 from media_factory.domain.metadata import (
     MetadataApprovalRequest,
     MetadataCategory,
@@ -43,6 +44,7 @@ from media_factory.persistence.analysis_repository import SQLAlchemyAnalysisRepo
 from media_factory.persistence.asset_repository import SQLAlchemyAssetRepository
 from media_factory.persistence.database import Database
 from media_factory.persistence.job_repository import SQLAlchemyJobRepository
+from media_factory.persistence.master_repository import SQLAlchemyMasterRepository
 from media_factory.persistence.metadata_repository import SQLAlchemyMetadataRepository
 from media_factory.persistence.narration_repository import SQLAlchemyNarrationRepository
 from media_factory.persistence.package_repository import SQLAlchemyPackageRepository
@@ -51,6 +53,11 @@ from media_factory.services.asset_ingest import AssetIngestService
 from media_factory.services.checksum import UploadTooLarge
 from media_factory.services.job_queue import RedisJobQueue
 from media_factory.services.job_service import JobDispatchError, JobService
+from media_factory.services.master_processing import (
+    FFmpegDecodeValidator,
+    FFmpegMasterAssembler,
+)
+from media_factory.services.master_service import MasterService, MasterWorkflowError
 from media_factory.services.media_inspector import FFprobeMediaInspector, MediaInspectionError
 from media_factory.services.metadata_service import MetadataService, MetadataWorkflowError
 from media_factory.services.narration_service import NarrationService, NarrationWorkflowError
@@ -165,6 +172,33 @@ def get_narration_service(
         narration=narration,
         narration_dir=settings.narration_dir,
         allow_additional_audio=settings.allow_additional_audio,
+    )
+
+
+def get_master_repository(
+    database: Database = Depends(get_database),
+) -> SQLAlchemyMasterRepository:
+    return SQLAlchemyMasterRepository(database.session_factory)
+
+
+def get_master_service(
+    settings: Settings = Depends(get_settings),
+    database: Database = Depends(get_database),
+    inspector: FFprobeMediaInspector = Depends(get_inspector),
+    masters: SQLAlchemyMasterRepository = Depends(get_master_repository),
+    narration: SQLAlchemyNarrationRepository = Depends(get_narration_repository),
+) -> MasterService:
+    return MasterService(
+        packages=SQLAlchemyPackageRepository(database.session_factory),
+        assets=SQLAlchemyAssetRepository(database.session_factory),
+        narration=narration,
+        masters=masters,
+        assembler=FFmpegMasterAssembler(ffmpeg_bin=settings.ffmpeg_bin),
+        decoder=FFmpegDecodeValidator(ffmpeg_bin=settings.ffmpeg_bin),
+        inspector=inspector,
+        master_dir=settings.master_dir,
+        duration_tolerance=settings.master_duration_tolerance,
+        container_extension=settings.master_container_extension,
     )
 
 
@@ -301,6 +335,7 @@ def create_job(
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=255),
     service: JobService = Depends(get_job_service),
     narration: NarrationService = Depends(get_narration_service),
+    masters: MasterService = Depends(get_master_service),
 ) -> Job:
     try:
         if request.kind is JobKind.GENERATE_NARRATION:
@@ -308,6 +343,8 @@ def create_job(
             if not isinstance(script_id, str) or not script_id:
                 raise NarrationWorkflowError("generate_narration requires script_id")
             narration.validate_tts_request(package_id, script_id)
+        elif request.kind is JobKind.BUILD_MASTER:
+            masters.validate_build_request(package_id)
         return service.create(
             package_id=package_id,
             kind=request.kind,
@@ -330,6 +367,40 @@ def create_job(
             detail={"code": "job_dispatch_failed", "message": str(exc)},
         ) from exc
     except NarrationWorkflowError as exc:
+        raise _workflow_conflict(exc.code, str(exc)) from exc
+    except MasterWorkflowError as exc:
+        raise _workflow_conflict(exc.code, str(exc)) from exc
+
+
+@app.post(
+    "/api/v1/packages/{package_id}/build-master",
+    response_model=Job,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def build_master(
+    package_id: str,
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=255),
+    jobs: JobService = Depends(get_job_service),
+    masters: MasterService = Depends(get_master_service),
+) -> Job:
+    try:
+        masters.validate_build_request(package_id)
+        return jobs.create(
+            package_id=package_id,
+            kind=JobKind.BUILD_MASTER,
+            idempotency_key=idempotency_key,
+            payload={},
+        )
+    except EntityNotFoundError as exc:
+        raise _not_found(exc) from exc
+    except IdempotencyConflictError as exc:
+        raise _workflow_conflict("idempotency_conflict", str(exc)) from exc
+    except JobDispatchError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "job_dispatch_failed", "message": str(exc)},
+        ) from exc
+    except MasterWorkflowError as exc:
         raise _workflow_conflict(exc.code, str(exc)) from exc
 
 
@@ -609,6 +680,17 @@ def list_audio_decisions(
     repository: SQLAlchemyNarrationRepository = Depends(get_narration_repository),
 ) -> list[AudioDecision]:
     return repository.list_audio_decisions(package_id)
+
+
+@app.get(
+    "/api/v1/packages/{package_id}/master-builds",
+    response_model=list[MasterBuild],
+)
+def list_master_builds(
+    package_id: str,
+    repository: SQLAlchemyMasterRepository = Depends(get_master_repository),
+) -> list[MasterBuild]:
+    return repository.list_for_package(package_id)
 
 
 def _not_found(exc: EntityNotFoundError) -> HTTPException:

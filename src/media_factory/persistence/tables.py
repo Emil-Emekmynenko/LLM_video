@@ -323,3 +323,34 @@ class AudioDecisionRow(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
     )
+
+
+class MasterBuildRow(Base):
+    __tablename__ = "master_builds"
+    __table_args__ = (Index("ix_master_builds_package_id", "package_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    package_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("packages.id"), nullable=False
+    )
+    source_asset_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("assets.id"), nullable=False
+    )
+    source_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    audio_decision_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("audio_decisions.id"), nullable=False
+    )
+    state: Mapped[str] = mapped_column(String(20), nullable=False)
+    output_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    output_size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    output_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    inspection: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    ffmpeg_command: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    decode_command: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    video_stream_copy: Mapped[bool] = mapped_column(nullable=False, default=True)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

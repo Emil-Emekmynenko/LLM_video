@@ -26,7 +26,12 @@ class PackageService:
         target: PackageState,
         expected_version: int,
     ) -> Package:
-        if target in {PackageState.GENERATING_NARRATION, PackageState.MASTER_BUILDING}:
+        if target in {
+            PackageState.GENERATING_NARRATION,
+            PackageState.MASTER_BUILDING,
+            PackageState.MASTER_FAILED,
+            PackageState.MASTER_READY,
+        }:
             raise GuardedPackageTransition(target)
         current = self.repository.get(package_id)
         if current.version != expected_version:

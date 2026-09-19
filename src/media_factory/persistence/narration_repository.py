@@ -262,6 +262,18 @@ class SQLAlchemyNarrationRepository:
         with self.session_factory() as session:
             return [self._decision_to_domain(row) for row in session.scalars(statement)]
 
+    def get_latest_audio_decision(self, package_id: str) -> AudioDecision:
+        with self.session_factory() as session:
+            row = session.scalar(
+                select(AudioDecisionRow)
+                .where(AudioDecisionRow.package_id == package_id)
+                .order_by(AudioDecisionRow.version.desc())
+                .limit(1)
+            )
+            if row is None:
+                raise EntityNotFoundError("audio_decision_for_package", package_id)
+            return self._decision_to_domain(row)
+
     def _update_run(self, run_id: str, **values: Any) -> TTSRun:
         with self.session_factory.begin() as session:
             result = cast(

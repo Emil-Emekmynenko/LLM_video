@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     tts_provider: str = "fake"
     allow_fake_tts: bool = True
     allow_additional_audio: bool = False
+    master_dir: Path = Path("data/masters")
+    master_container_extension: str = "mp4"
+    master_duration_tolerance: float = Field(default=0.1, ge=0)
 
 
 @lru_cache(maxsize=1)

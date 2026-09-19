@@ -5,6 +5,7 @@ from media_factory.persistence.analysis_repository import SQLAlchemyAnalysisRepo
 from media_factory.persistence.asset_repository import SQLAlchemyAssetRepository
 from media_factory.persistence.database import Database
 from media_factory.persistence.job_repository import SQLAlchemyJobRepository
+from media_factory.persistence.master_repository import SQLAlchemyMasterRepository
 from media_factory.persistence.metadata_repository import SQLAlchemyMetadataRepository
 from media_factory.persistence.narration_repository import SQLAlchemyNarrationRepository
 from media_factory.persistence.package_repository import SQLAlchemyPackageRepository
@@ -18,6 +19,11 @@ from media_factory.providers.video_understanding import (
     VideoUnderstandingProvider,
 )
 from media_factory.services.analysis_service import AnalysisService
+from media_factory.services.master_processing import (
+    FFmpegDecodeValidator,
+    FFmpegMasterAssembler,
+)
+from media_factory.services.master_service import MasterService
 from media_factory.services.media_inspector import FFprobeMediaInspector, MediaInspectionError
 from media_factory.services.narration_service import NarrationService
 from media_factory.services.scene_detection import PySceneDetector
@@ -42,6 +48,8 @@ def execute_job(job_id: str) -> None:
             if not isinstance(script_id, str) or not script_id:
                 raise RuntimeError("generate_narration job requires script_id")
             _execute_narration(settings, database, packages, job.package_id, script_id)
+        elif job.kind is JobKind.BUILD_MASTER:
+            _execute_master_build(settings, database, packages, assets, job.package_id)
         else:
             raise UnsupportedJobKind(job.kind.value)
         jobs.mark_succeeded(job.id)
@@ -153,3 +161,25 @@ def _build_tts_provider(settings: Settings) -> TextToSpeechProvider:
             raise RuntimeError("Fake TTS provider is forbidden outside development")
         return FakeTextToSpeechProvider()
     raise RuntimeError(f"Unsupported TTS provider: {settings.tts_provider}")
+
+
+def _execute_master_build(
+    settings: Settings,
+    database: Database,
+    packages: SQLAlchemyPackageRepository,
+    assets: SQLAlchemyAssetRepository,
+    package_id: str,
+) -> None:
+    service = MasterService(
+        packages=packages,
+        assets=assets,
+        narration=SQLAlchemyNarrationRepository(database.session_factory),
+        masters=SQLAlchemyMasterRepository(database.session_factory),
+        assembler=FFmpegMasterAssembler(ffmpeg_bin=settings.ffmpeg_bin),
+        decoder=FFmpegDecodeValidator(ffmpeg_bin=settings.ffmpeg_bin),
+        inspector=FFprobeMediaInspector(ffprobe_bin=settings.ffprobe_bin),
+        master_dir=settings.master_dir,
+        duration_tolerance=settings.master_duration_tolerance,
+        container_extension=settings.master_container_extension,
+    )
+    service.build(package_id)

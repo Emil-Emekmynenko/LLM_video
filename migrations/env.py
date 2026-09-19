@@ -13,6 +13,7 @@ from media_factory.persistence.tables import (  # noqa: F401
     AudioDecisionRow,
     AudioTrackRow,
     JobRow,
+    MasterBuildRow,
     MetadataCategoryRow,
     MetadataVersionRow,
     NarrationScriptRow,
