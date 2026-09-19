@@ -1,9 +1,11 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 
 from media_factory.config import Settings, get_settings
 from media_factory.domain.analysis import (
@@ -41,10 +43,12 @@ from media_factory.domain.narration import (
 from media_factory.domain.package import Package, PackageCreate, PackageTransitionRequest
 from media_factory.domain.package_state import InvalidPackageTransition
 from media_factory.domain.packaging import PackageBuild
+from media_factory.domain.qa import ExportState, LocalExport, QAReview, QAReviewRequest
 from media_factory.domain.transcription import TranscriptionRun
 from media_factory.persistence.analysis_repository import SQLAlchemyAnalysisRepository
 from media_factory.persistence.asset_repository import SQLAlchemyAssetRepository
 from media_factory.persistence.database import Database
+from media_factory.persistence.export_repository import SQLAlchemyExportRepository
 from media_factory.persistence.job_repository import SQLAlchemyJobRepository
 from media_factory.persistence.master_repository import SQLAlchemyMasterRepository
 from media_factory.persistence.metadata_repository import SQLAlchemyMetadataRepository
@@ -53,12 +57,17 @@ from media_factory.persistence.package_build_repository import (
     SQLAlchemyPackageBuildRepository,
 )
 from media_factory.persistence.package_repository import SQLAlchemyPackageRepository
+from media_factory.persistence.qa_repository import (
+    QAReviewAlreadyExists,
+    SQLAlchemyQARepository,
+)
 from media_factory.persistence.transcription_repository import (
     SQLAlchemyTranscriptionRepository,
 )
 from media_factory.services.analysis_review import AnalysisReviewError, AnalysisReviewService
 from media_factory.services.asset_ingest import AssetIngestService
 from media_factory.services.checksum import UploadTooLarge
+from media_factory.services.export_service import ExportWorkflowError, LocalExportService
 from media_factory.services.job_queue import RedisJobQueue
 from media_factory.services.job_service import JobDispatchError, JobService
 from media_factory.services.master_processing import (
@@ -74,6 +83,7 @@ from media_factory.services.packaging_service import (
     PackagingService,
     PackagingWorkflowError,
 )
+from media_factory.services.qa_service import QAArtifactMismatch, QAService, QAWorkflowError
 from media_factory.services.transcript_validator import validate_transcript
 from media_factory.services.transcription_service import (
     TranscriptionService,
@@ -268,6 +278,47 @@ def get_packaging_service(
     )
 
 
+def get_qa_repository(
+    database: Database = Depends(get_database),
+) -> SQLAlchemyQARepository:
+    return SQLAlchemyQARepository(database.session_factory)
+
+
+def get_qa_service(
+    database: Database = Depends(get_database),
+    builds: SQLAlchemyPackageBuildRepository = Depends(get_package_build_repository),
+    reviews: SQLAlchemyQARepository = Depends(get_qa_repository),
+) -> QAService:
+    return QAService(
+        packages=SQLAlchemyPackageRepository(database.session_factory),
+        builds=builds,
+        reviews=reviews,
+    )
+
+
+def get_export_repository(
+    database: Database = Depends(get_database),
+) -> SQLAlchemyExportRepository:
+    return SQLAlchemyExportRepository(database.session_factory)
+
+
+def get_export_service(
+    settings: Settings = Depends(get_settings),
+    database: Database = Depends(get_database),
+    builds: SQLAlchemyPackageBuildRepository = Depends(get_package_build_repository),
+    reviews: SQLAlchemyQARepository = Depends(get_qa_repository),
+    exports: SQLAlchemyExportRepository = Depends(get_export_repository),
+) -> LocalExportService:
+    return LocalExportService(
+        packages=SQLAlchemyPackageRepository(database.session_factory),
+        builds=builds,
+        reviews=reviews,
+        exports=exports,
+        export_dir=settings.export_dir,
+        chunk_size=settings.export_chunk_size,
+    )
+
+
 @app.get("/api/v1/health/live")
 def live() -> dict[str, str]:
     return {"status": "ok"}
@@ -404,6 +455,7 @@ def create_job(
     masters: MasterService = Depends(get_master_service),
     transcriptions: TranscriptionService = Depends(get_transcription_service),
     packaging: PackagingService = Depends(get_packaging_service),
+    exports: LocalExportService = Depends(get_export_service),
 ) -> Job:
     try:
         if request.kind is JobKind.GENERATE_NARRATION:
@@ -417,6 +469,11 @@ def create_job(
             transcriptions.validate_request(package_id)
         elif request.kind is JobKind.BUILD_PACKAGE:
             packaging.validate_request(package_id)
+        elif request.kind is JobKind.EXPORT_PACKAGE:
+            package_build_id = request.payload.get("package_build_id")
+            if not isinstance(package_build_id, str) or not package_build_id:
+                raise ExportWorkflowError("export_package requires package_build_id")
+            exports.validate_request(package_id, package_build_id)
         return service.create(
             package_id=package_id,
             kind=request.kind,
@@ -445,6 +502,8 @@ def create_job(
     except TranscriptionWorkflowError as exc:
         raise _workflow_conflict(exc.code, str(exc)) from exc
     except PackagingWorkflowError as exc:
+        raise _workflow_conflict(exc.code, str(exc)) from exc
+    except ExportWorkflowError as exc:
         raise _workflow_conflict(exc.code, str(exc)) from exc
 
 
@@ -541,6 +600,58 @@ def build_package(
             detail={"code": "job_dispatch_failed", "message": str(exc)},
         ) from exc
     except PackagingWorkflowError as exc:
+        raise _workflow_conflict(exc.code, str(exc)) from exc
+
+
+@app.post("/api/v1/packages/{package_id}/approve", response_model=QAReview)
+def review_package(
+    package_id: str,
+    request: QAReviewRequest,
+    service: QAService = Depends(get_qa_service),
+) -> QAReview:
+    try:
+        return service.review(package_id, request)
+    except EntityNotFoundError as exc:
+        raise _not_found(exc) from exc
+    except VersionConflictError as exc:
+        raise _version_conflict(exc) from exc
+    except QAReviewAlreadyExists as exc:
+        raise _workflow_conflict(exc.code, str(exc)) from exc
+    except (QAWorkflowError, QAArtifactMismatch) as exc:
+        raise _workflow_conflict(exc.code, str(exc)) from exc
+
+
+@app.post(
+    "/api/v1/package-builds/{package_build_id}/exports",
+    response_model=Job,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def create_local_export(
+    package_build_id: str,
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=255),
+    jobs: JobService = Depends(get_job_service),
+    builds: SQLAlchemyPackageBuildRepository = Depends(get_package_build_repository),
+    exports: LocalExportService = Depends(get_export_service),
+) -> Job:
+    try:
+        build = builds.get(package_build_id)
+        exports.validate_request(build.package_id, build.id)
+        return jobs.create(
+            package_id=build.package_id,
+            kind=JobKind.EXPORT_PACKAGE,
+            idempotency_key=idempotency_key,
+            payload={"package_build_id": build.id},
+        )
+    except EntityNotFoundError as exc:
+        raise _not_found(exc) from exc
+    except IdempotencyConflictError as exc:
+        raise _workflow_conflict("idempotency_conflict", str(exc)) from exc
+    except JobDispatchError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "job_dispatch_failed", "message": str(exc)},
+        ) from exc
+    except ExportWorkflowError as exc:
         raise _workflow_conflict(exc.code, str(exc)) from exc
 
 
@@ -857,6 +968,52 @@ def list_package_builds(
     ),
 ) -> list[PackageBuild]:
     return repository.list_for_package(package_id)
+
+
+@app.get("/api/v1/packages/{package_id}/qa-reviews", response_model=list[QAReview])
+def list_qa_reviews(
+    package_id: str,
+    repository: SQLAlchemyQARepository = Depends(get_qa_repository),
+) -> list[QAReview]:
+    return repository.list_for_package(package_id)
+
+
+@app.get(
+    "/api/v1/package-builds/{package_build_id}/exports",
+    response_model=list[LocalExport],
+)
+def list_local_exports(
+    package_build_id: str,
+    repository: SQLAlchemyExportRepository = Depends(get_export_repository),
+) -> list[LocalExport]:
+    return repository.list_for_build(package_build_id)
+
+
+@app.get("/api/v1/exports/{export_id}/download", response_class=FileResponse)
+def download_local_export(
+    export_id: str,
+    repository: SQLAlchemyExportRepository = Depends(get_export_repository),
+) -> FileResponse:
+    try:
+        export = repository.get(export_id)
+        if export.state is not ExportState.SUCCEEDED or export.archive_path is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "export_not_ready"},
+            )
+        archive = Path(export.archive_path)
+        if not archive.is_file() or archive.is_symlink():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "export_artifact_missing"},
+            )
+        return FileResponse(
+            archive,
+            media_type="application/zip",
+            filename=archive.name,
+        )
+    except EntityNotFoundError as exc:
+        raise _not_found(exc) from exc
 
 
 def _not_found(exc: EntityNotFoundError) -> HTTPException:

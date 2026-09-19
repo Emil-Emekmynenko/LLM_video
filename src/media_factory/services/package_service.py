@@ -38,6 +38,7 @@ class PackageService:
             PackageState.PACKAGING,
             PackageState.VALIDATION_FAILED,
             PackageState.AWAITING_QA,
+            PackageState.VALIDATED,
         }:
             raise GuardedPackageTransition(target)
         current = self.repository.get(package_id)

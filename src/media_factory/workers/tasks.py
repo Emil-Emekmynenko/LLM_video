@@ -4,6 +4,7 @@ from media_factory.domain.package_state import PackageState
 from media_factory.persistence.analysis_repository import SQLAlchemyAnalysisRepository
 from media_factory.persistence.asset_repository import SQLAlchemyAssetRepository
 from media_factory.persistence.database import Database
+from media_factory.persistence.export_repository import SQLAlchemyExportRepository
 from media_factory.persistence.job_repository import SQLAlchemyJobRepository
 from media_factory.persistence.master_repository import SQLAlchemyMasterRepository
 from media_factory.persistence.metadata_repository import SQLAlchemyMetadataRepository
@@ -12,6 +13,7 @@ from media_factory.persistence.package_build_repository import (
     SQLAlchemyPackageBuildRepository,
 )
 from media_factory.persistence.package_repository import SQLAlchemyPackageRepository
+from media_factory.persistence.qa_repository import SQLAlchemyQARepository
 from media_factory.persistence.transcription_repository import (
     SQLAlchemyTranscriptionRepository,
 )
@@ -30,6 +32,7 @@ from media_factory.providers.video_understanding import (
     VideoUnderstandingProvider,
 )
 from media_factory.services.analysis_service import AnalysisService
+from media_factory.services.export_service import LocalExportService
 from media_factory.services.master_processing import (
     FFmpegDecodeValidator,
     FFmpegMasterAssembler,
@@ -67,6 +70,17 @@ def execute_job(job_id: str) -> None:
             _execute_transcription(settings, database, packages, job.package_id)
         elif job.kind is JobKind.BUILD_PACKAGE:
             _execute_package_build(settings, database, packages, assets, job.package_id)
+        elif job.kind is JobKind.EXPORT_PACKAGE:
+            package_build_id = job.payload.get("package_build_id")
+            if not isinstance(package_build_id, str) or not package_build_id:
+                raise RuntimeError("export_package job requires package_build_id")
+            _execute_local_export(
+                settings,
+                database,
+                packages,
+                job.package_id,
+                package_build_id,
+            )
         else:
             raise UnsupportedJobKind(job.kind.value)
         jobs.mark_succeeded(job.id)
@@ -264,3 +278,21 @@ def _execute_package_build(
         duration_tolerance=settings.transcript_duration_tolerance,
     )
     service.build(package_id)
+
+
+def _execute_local_export(
+    settings: Settings,
+    database: Database,
+    packages: SQLAlchemyPackageRepository,
+    package_id: str,
+    package_build_id: str,
+) -> None:
+    service = LocalExportService(
+        packages=packages,
+        builds=SQLAlchemyPackageBuildRepository(database.session_factory),
+        reviews=SQLAlchemyQARepository(database.session_factory),
+        exports=SQLAlchemyExportRepository(database.session_factory),
+        export_dir=settings.export_dir,
+        chunk_size=settings.export_chunk_size,
+    )
+    service.export(package_id, package_build_id)

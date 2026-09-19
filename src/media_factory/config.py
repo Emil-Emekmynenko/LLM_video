@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     package_dir: Path = Path("data/packages")
     default_customer: str = "internal"
     default_customer_schema_version: str = "1.0"
+    export_dir: Path = Path("data/exports")
+    export_chunk_size: int = Field(default=1024 * 1024, ge=64 * 1024)
 
 
 @lru_cache(maxsize=1)

@@ -432,3 +432,52 @@ class PackageBuildRow(Base):
         DateTime(timezone=True), default=utc_now, nullable=False
     )
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class QAReviewRow(Base):
+    __tablename__ = "qa_reviews"
+    __table_args__ = (
+        UniqueConstraint("package_build_id", name="uq_qa_review_package_build"),
+        Index("ix_qa_reviews_package_id", "package_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    package_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("packages.id"), nullable=False
+    )
+    package_build_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("package_builds.id"), nullable=False
+    )
+    decision: Mapped[str] = mapped_column(String(20), nullable=False)
+    reviewer: Mapped[str] = mapped_column(String(200), nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    manifest_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    reviewed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+
+
+class LocalExportRow(Base):
+    __tablename__ = "local_exports"
+    __table_args__ = (Index("ix_local_exports_package_build_id", "package_build_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    package_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("packages.id"), nullable=False
+    )
+    package_build_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("package_builds.id"), nullable=False
+    )
+    qa_review_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("qa_reviews.id"), nullable=False
+    )
+    state: Mapped[str] = mapped_column(String(20), nullable=False)
+    archive_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    archive_size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    archive_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

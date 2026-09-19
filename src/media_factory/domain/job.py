@@ -12,6 +12,7 @@ class JobKind(StrEnum):
     BUILD_MASTER = "build_master"
     TRANSCRIBE_MASTER = "transcribe_master"
     BUILD_PACKAGE = "build_package"
+    EXPORT_PACKAGE = "export_package"
 
 
 class JobState(StrEnum):
