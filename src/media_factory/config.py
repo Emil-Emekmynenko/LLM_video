@@ -16,9 +16,10 @@ class Settings(BaseSettings):
     upload_dir: Path = Path("data/uploads")
     max_upload_bytes: int = 6 * 1024 * 1024 * 1024
     ffprobe_bin: str = "ffprobe"
+    database_url: str = "sqlite:///./data/media_factory.sqlite3"
+    auto_create_schema: bool = True
 
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()
-

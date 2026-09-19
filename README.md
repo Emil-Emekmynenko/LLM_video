@@ -14,16 +14,17 @@
 
 ## Требования
 
-- Python 3.9+ для текущего прототипа;
+- Python 3.12+;
 - FFmpeg/ffprobe для реальной инспекции видео;
-- рекомендуемая production-версия Python — 3.12+.
+- SQLite для локального режима или PostgreSQL для production.
 
 ## Запуск
 
 ```bash
-python3 -m venv .venv
+python3.12 -m venv .venv
 .venv/bin/pip install -e '.[dev]'
 cp .env.example .env
+.venv/bin/alembic upgrade head
 .venv/bin/uvicorn media_factory.api.app:app --reload
 ```
 
@@ -52,3 +53,14 @@ curl -F 'file=@example.mp4' http://127.0.0.1:8000/api/v1/assets/uploads
 
 Тесты не требуют реального FFmpeg: внешний процесс подменяется fake runner.
 
+## Запуск через контейнеры
+
+Production-подобный локальный запуск использует PostgreSQL и образ API с FFmpeg:
+
+```bash
+docker compose up --build
+```
+
+После миграций API доступен на `http://127.0.0.1:8000`, а OpenAPI — на
+`http://127.0.0.1:8000/docs`. Пароль в `compose.yaml` предназначен только для
+локальной разработки и должен заменяться секретом в любой внешней среде.

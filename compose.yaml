@@ -1,0 +1,35 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: media_factory
+      POSTGRES_USER: media_factory
+      POSTGRES_PASSWORD: local-development-only
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U media_factory -d media_factory"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  api:
+    build: .
+    environment:
+      MEDIA_FACTORY_ENV: development
+      MEDIA_FACTORY_DATABASE_URL: postgresql+psycopg://media_factory:local-development-only@postgres:5432/media_factory
+      MEDIA_FACTORY_UPLOAD_DIR: /data/uploads
+      MEDIA_FACTORY_FFPROBE_BIN: ffprobe
+      MEDIA_FACTORY_AUTO_CREATE_SCHEMA: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    volumes:
+      - media-data:/data
+
+volumes:
+  postgres-data:
+  media-data:
+

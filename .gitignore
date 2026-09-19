@@ -3,6 +3,8 @@
 .env.*
 !.env.example
 .venv/
+.venv*/
+.python/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -30,4 +32,4 @@ logs/
 *.zip
 *.db
 *.sqlite
-
+*.sqlite3

@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import BinaryIO, Optional
+from typing import BinaryIO, Protocol
 from uuid import uuid4
 
 from media_factory.domain.models import StoredAsset
@@ -13,13 +13,19 @@ class InMemoryAssetIndex:
         self._assets: dict[str, StoredAsset] = {}
         self._by_sha256: dict[str, str] = {}
 
-    def find_by_sha256(self, sha256: str) -> Optional[StoredAsset]:
+    def find_by_sha256(self, sha256: str) -> StoredAsset | None:
         asset_id = self._by_sha256.get(sha256)
         return self._assets.get(asset_id) if asset_id else None
 
     def save(self, asset: StoredAsset) -> None:
         self._assets[asset.id] = asset
         self._by_sha256.setdefault(asset.sha256, asset.id)
+
+
+class AssetRepository(Protocol):
+    def find_by_sha256(self, sha256: str) -> StoredAsset | None: ...
+
+    def save(self, asset: StoredAsset) -> None: ...
 
 
 class AssetIngestService:
@@ -29,12 +35,12 @@ class AssetIngestService:
         upload_dir: Path,
         max_upload_bytes: int,
         inspector: FFprobeMediaInspector,
-        index: InMemoryAssetIndex,
+        repository: AssetRepository,
     ) -> None:
         self.upload_dir = upload_dir
         self.max_upload_bytes = max_upload_bytes
         self.inspector = inspector
-        self.index = index
+        self.repository = repository
 
     def ingest(self, source: BinaryIO, original_name: str) -> StoredAsset:
         self.upload_dir.mkdir(parents=True, exist_ok=True)
@@ -53,7 +59,7 @@ class AssetIngestService:
             destination.unlink(missing_ok=True)
             raise
 
-        duplicate = self.index.find_by_sha256(sha256)
+        duplicate = self.repository.find_by_sha256(sha256)
         inspection = None
         if duplicate is None:
             try:
@@ -71,8 +77,8 @@ class AssetIngestService:
             duplicate_of=duplicate.id if duplicate else None,
             inspection=inspection,
         )
-        self.index.save(asset)
+        self.repository.save(asset)
         return asset
 
 
-__all__ = ["AssetIngestService", "InMemoryAssetIndex", "UploadTooLarge"]
+__all__ = ["AssetIngestService", "AssetRepository", "InMemoryAssetIndex", "UploadTooLarge"]

@@ -1,21 +1,39 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from functools import lru_cache
 from typing import Any
 
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, status
 
 from media_factory.config import Settings, get_settings
 from media_factory.domain.models import StoredAsset, Transcript, ValidationIssue
-from media_factory.services.asset_ingest import AssetIngestService, InMemoryAssetIndex
+from media_factory.persistence.asset_repository import SQLAlchemyAssetRepository
+from media_factory.persistence.database import Database
+from media_factory.services.asset_ingest import AssetIngestService
 from media_factory.services.checksum import UploadTooLarge
 from media_factory.services.media_inspector import FFprobeMediaInspector, MediaInspectionError
 from media_factory.services.transcript_validator import validate_transcript
+
+
+@lru_cache(maxsize=1)
+def get_database() -> Database:
+    return Database(get_settings().database_url)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    settings = get_settings()
+    if settings.auto_create_schema:
+        get_database().create_schema()
+    yield
+
 
 app = FastAPI(
     title="Media Dataset Factory",
     version="0.1.0",
     description="Prepare, validate, package, and deliver video assets.",
+    lifespan=lifespan,
 )
-
-_asset_index = InMemoryAssetIndex()
 
 
 def get_inspector(settings: Settings = Depends(get_settings)) -> FFprobeMediaInspector:
@@ -25,12 +43,13 @@ def get_inspector(settings: Settings = Depends(get_settings)) -> FFprobeMediaIns
 def get_ingest_service(
     settings: Settings = Depends(get_settings),
     inspector: FFprobeMediaInspector = Depends(get_inspector),
+    database: Database = Depends(get_database),
 ) -> AssetIngestService:
     return AssetIngestService(
         upload_dir=settings.upload_dir,
         max_upload_bytes=settings.max_upload_bytes,
         inspector=inspector,
-        index=_asset_index,
+        repository=SQLAlchemyAssetRepository(database.session_factory),
     )
 
 
@@ -40,11 +59,19 @@ def live() -> dict[str, str]:
 
 
 @app.get("/api/v1/health/ready")
-def ready(inspector: FFprobeMediaInspector = Depends(get_inspector)) -> dict[str, Any]:
+def ready(
+    inspector: FFprobeMediaInspector = Depends(get_inspector),
+    database: Database = Depends(get_database),
+) -> dict[str, Any]:
     ffprobe_available = inspector.is_available()
+    database_available = database.is_available()
+    is_ready = ffprobe_available and database_available
     return {
-        "status": "ready" if ffprobe_available else "not_ready",
-        "checks": {"ffprobe": ffprobe_available},
+        "status": "ready" if is_ready else "not_ready",
+        "checks": {
+            "database": database_available,
+            "ffprobe": ffprobe_available,
+        },
     }
 
 

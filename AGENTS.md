@@ -17,8 +17,9 @@ Media Dataset Factory is an internal platform for turning source video into a va
 ## Local commands
 
 ```bash
-python3 -m venv .venv
+python3.12 -m venv .venv
 .venv/bin/pip install -e '.[dev]'
+.venv/bin/alembic upgrade head
 .venv/bin/ruff check .
 .venv/bin/mypy src
 .venv/bin/pytest
@@ -32,4 +33,3 @@ python3 -m venv .venv
 - Preserve unrelated user changes.
 - Update documentation and tests with behavior changes.
 - Do not weaken blocking validation to make a happy-path test pass.
-

@@ -1,11 +1,11 @@
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class Severity(str, Enum):
+class Severity(StrEnum):
     ERROR = "error"
     WARNING = "warning"
 
@@ -35,7 +35,7 @@ class Transcript(BaseModel):
     schema_version: str = "1.0"
     asset_id: str
     master_sha256: str
-    language: Optional[str] = None
+    language: str | None = None
     media_duration: float
     segments: list[TranscriptSegment] = Field(default_factory=list)
 
@@ -45,10 +45,10 @@ class StreamInfo(BaseModel):
 
     index: int
     codec_type: str
-    codec_name: Optional[str] = None
-    width: Optional[int] = None
-    height: Optional[int] = None
-    avg_frame_rate: Optional[str] = None
+    codec_name: str | None = None
+    width: int | None = None
+    height: int | None = None
+    avg_frame_rate: str | None = None
 
 
 class MediaInspection(BaseModel):
@@ -56,7 +56,7 @@ class MediaInspection(BaseModel):
     size_bytes: int
     format_name: str
     streams: list[StreamInfo]
-    raw: dict[str, Any] = Field(exclude=True)
+    raw: dict[str, Any] = Field(default_factory=dict, exclude=True)
 
     @property
     def video_streams(self) -> list[StreamInfo]:
@@ -73,5 +73,5 @@ class StoredAsset(BaseModel):
     stored_path: Path = Field(exclude=True)
     size_bytes: int
     sha256: str
-    duplicate_of: Optional[str] = None
-    inspection: Optional[MediaInspection] = None
+    duplicate_of: str | None = None
+    inspection: MediaInspection | None = None

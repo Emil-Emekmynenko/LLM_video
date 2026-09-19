@@ -1,8 +1,9 @@
 import json
 import shutil
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from media_factory.domain.models import MediaInspection, StreamInfo
 
