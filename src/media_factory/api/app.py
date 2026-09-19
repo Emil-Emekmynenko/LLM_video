@@ -1,14 +1,34 @@
 import hashlib
+import json
+import logging
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    status,
+)
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from media_factory.api.security import (
+    AuthenticationError,
+    PermissionDeniedError,
+    authenticate,
+    authorize,
+)
 from media_factory.config import Settings, get_settings
 from media_factory.domain.analysis import (
     AnalysisClip,
@@ -17,6 +37,7 @@ from media_factory.domain.analysis import (
     EventReviewRequest,
     TimelineEvent,
 )
+from media_factory.domain.audit import AuditEvent, Principal
 from media_factory.domain.delivery import (
     DeliveryAttempt,
     DeliveryCreateRequest,
@@ -54,6 +75,7 @@ from media_factory.domain.qa import ExportState, LocalExport, QAReview, QAReview
 from media_factory.domain.transcription import TranscriptionRun
 from media_factory.persistence.analysis_repository import SQLAlchemyAnalysisRepository
 from media_factory.persistence.asset_repository import SQLAlchemyAssetRepository
+from media_factory.persistence.audit_repository import SQLAlchemyAuditRepository
 from media_factory.persistence.database import Database
 from media_factory.persistence.delivery_repository import (
     DeliveryStateConflict,
@@ -100,6 +122,12 @@ from media_factory.services.packaging_service import (
     PackagingWorkflowError,
 )
 from media_factory.services.qa_service import QAArtifactMismatch, QAService, QAWorkflowError
+from media_factory.services.request_context import (
+    RequestContext,
+    get_request_context,
+    reset_request_context,
+    set_request_context,
+)
 from media_factory.services.transcript_validator import validate_transcript
 from media_factory.services.transcription_service import (
     TranscriptionService,
@@ -128,6 +156,106 @@ app = FastAPI(
 )
 UI_DIR = Path(__file__).resolve().parents[1] / "ui"
 app.mount("/ui", StaticFiles(directory=UI_DIR), name="ui")
+http_logger = logging.getLogger("media_factory.http")
+
+
+@app.middleware("http")
+async def request_security_audit(request: Request, call_next: Any) -> Any:
+    started = time.perf_counter()
+    correlation_id = request.headers.get("X-Request-ID") or str(uuid4())
+    api_path = request.url.path.startswith("/api/v1/")
+    if api_path and request.url.path not in {
+        "/api/v1/health/live",
+        "/api/v1/health/ready",
+    }:
+        try:
+            principal = authenticate(get_settings(), request.headers.get("X-API-Key"))
+            route_path = request.url.path
+            authorize(principal, request.method, route_path)
+        except AuthenticationError as exc:
+            return JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                content={"detail": {"code": "authentication_required", "message": str(exc)}},
+                headers={"X-Request-ID": correlation_id},
+            )
+        except PermissionDeniedError as exc:
+            return JSONResponse(
+                status_code=status.HTTP_403_FORBIDDEN,
+                content={"detail": {"code": "permission_denied", "message": str(exc)}},
+                headers={"X-Request-ID": correlation_id},
+            )
+    else:
+        principal = authenticate(Settings(auth_enabled=False), None)
+
+    token = set_request_context(
+        RequestContext(principal=principal, correlation_id=correlation_id)
+    )
+    response: Any = None
+    try:
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = correlation_id
+        should_audit = (
+            api_path
+            and request.method not in {"GET", "HEAD", "OPTIONS"}
+            and response.status_code < 400
+        )
+        if should_audit:
+            route = request.scope.get("route")
+            route_path = getattr(route, "path", request.url.path)
+            package_id = request.path_params.get("package_id")
+            entity_type = _audit_entity_type(route_path)
+            entity_id = _audit_entity_id(request)
+            try:
+                SQLAlchemyAuditRepository(get_database().session_factory).record(
+                    action=f"http.{request.method.lower()}.{route_path}",
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    package_id=package_id,
+                    details={"status_code": response.status_code},
+                )
+            except Exception:
+                http_logger.exception("audit_record_failed")
+        return response
+    finally:
+        duration_ms = round((time.perf_counter() - started) * 1000, 2)
+        http_logger.info(
+            json.dumps(
+                {
+                    "event": "http_request",
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status_code": getattr(response, "status_code", 500),
+                    "duration_ms": duration_ms,
+                    "correlation_id": correlation_id,
+                    "actor": principal.actor,
+                    "role": principal.role.value,
+                },
+                separators=(",", ":"),
+            )
+        )
+        reset_request_context(token)
+
+
+def _audit_entity_type(route_path: str) -> str:
+    parts = [part for part in route_path.split("/") if part and not part.startswith("{")]
+    return parts[2].rstrip("s") if len(parts) > 2 else "api"
+
+
+def _audit_entity_id(request: Request) -> str | None:
+    for name in (
+        "package_id",
+        "asset_id",
+        "event_id",
+        "analysis_run_id",
+        "metadata_id",
+        "script_id",
+        "delivery_id",
+        "package_build_id",
+    ):
+        value = request.path_params.get(name)
+        if value:
+            return str(value)
+    return None
 
 
 def get_inspector(settings: Settings = Depends(get_settings)) -> FFprobeMediaInspector:
@@ -157,6 +285,12 @@ def get_package_service(database: Database = Depends(get_database)) -> PackageSe
     return PackageService(SQLAlchemyPackageRepository(database.session_factory))
 
 
+def get_package_repository(
+    database: Database = Depends(get_database),
+) -> SQLAlchemyPackageRepository:
+    return SQLAlchemyPackageRepository(database.session_factory)
+
+
 def get_job_service(
     database: Database = Depends(get_database),
     queue: RedisJobQueue = Depends(get_job_queue),
@@ -168,6 +302,12 @@ def get_analysis_repository(
     database: Database = Depends(get_database),
 ) -> SQLAlchemyAnalysisRepository:
     return SQLAlchemyAnalysisRepository(database.session_factory)
+
+
+def get_audit_repository(
+    database: Database = Depends(get_database),
+) -> SQLAlchemyAuditRepository:
+    return SQLAlchemyAuditRepository(database.session_factory)
 
 
 def get_metadata_repository(
@@ -390,6 +530,33 @@ def ready(
             "redis": redis_available,
         },
     }
+
+
+@app.get("/api/v1/auth/me", response_model=Principal)
+def current_principal() -> Principal:
+    return get_request_context().principal
+
+
+@app.get("/api/v1/audit-events", response_model=list[AuditEvent])
+def list_audit_events(
+    limit: int = Query(default=200, ge=1, le=1000),
+    repository: SQLAlchemyAuditRepository = Depends(get_audit_repository),
+) -> list[AuditEvent]:
+    return repository.list_events(limit=limit)
+
+
+@app.get("/api/v1/packages/{package_id}/audit-events", response_model=list[AuditEvent])
+def list_package_audit_events(
+    package_id: str,
+    limit: int = Query(default=200, ge=1, le=1000),
+    packages: SQLAlchemyPackageRepository = Depends(get_package_repository),
+    repository: SQLAlchemyAuditRepository = Depends(get_audit_repository),
+) -> list[AuditEvent]:
+    try:
+        packages.get(package_id)
+        return repository.list_events(package_id=package_id, limit=limit)
+    except EntityNotFoundError as exc:
+        raise _not_found(exc) from exc
 
 
 @app.post(

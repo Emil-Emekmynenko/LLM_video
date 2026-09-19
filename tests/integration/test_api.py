@@ -46,6 +46,16 @@ def test_health_live() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+    assert response.headers["X-Request-ID"]
+
+
+def test_local_mode_exposes_admin_principal() -> None:
+    client = TestClient(app)
+
+    response = client.get("/api/v1/auth/me")
+
+    assert response.status_code == 200
+    assert response.json() == {"actor": "local-admin", "role": "admin"}
 
 
 def test_operator_console_and_static_assets_are_served() -> None:

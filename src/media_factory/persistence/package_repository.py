@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from media_factory.domain.errors import EntityNotFoundError, VersionConflictError
 from media_factory.domain.package import Package
 from media_factory.domain.package_state import PackageState
-from media_factory.persistence.tables import AssetRow, PackageRow, utc_now
+from media_factory.persistence.tables import AssetRow, AuditEventRow, PackageRow, utc_now
+from media_factory.services.request_context import get_request_context
 
 
 class SQLAlchemyPackageRepository:
@@ -62,10 +63,12 @@ class SQLAlchemyPackageRepository:
             )
         )
         with self.session_factory.begin() as session:
+            current = session.get(PackageRow, package_id)
+            if current is None:
+                raise EntityNotFoundError("package", package_id)
+            previous_state = current.state
             result = cast(CursorResult[Any], session.execute(statement))
             if result.rowcount != 1:
-                if session.get(PackageRow, package_id) is None:
-                    raise EntityNotFoundError("package", package_id)
                 raise VersionConflictError("package", package_id, expected_version)
 
             refreshed_statement: Select[tuple[PackageRow]] = select(PackageRow).where(
@@ -74,6 +77,20 @@ class SQLAlchemyPackageRepository:
             row = session.scalar(refreshed_statement)
             if row is None:
                 raise EntityNotFoundError("package", package_id)
+            context = get_request_context()
+            session.add(
+                AuditEventRow(
+                    id=str(uuid4()),
+                    actor=context.principal.actor,
+                    role=context.principal.role.value,
+                    action="package.state_changed",
+                    entity_type="package",
+                    entity_id=package_id,
+                    package_id=package_id,
+                    correlation_id=context.correlation_id,
+                    details={"from": previous_state, "to": target.value},
+                )
+            )
             return self._to_domain(row)
 
     @staticmethod

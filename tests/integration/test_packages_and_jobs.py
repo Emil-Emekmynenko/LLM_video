@@ -9,6 +9,7 @@ from media_factory.domain.job import JobKind
 from media_factory.domain.models import StoredAsset
 from media_factory.domain.package_state import InvalidPackageTransition, PackageState
 from media_factory.persistence.asset_repository import SQLAlchemyAssetRepository
+from media_factory.persistence.audit_repository import SQLAlchemyAuditRepository
 from media_factory.persistence.database import Database
 from media_factory.persistence.job_repository import SQLAlchemyJobRepository
 from media_factory.persistence.package_repository import SQLAlchemyPackageRepository
@@ -44,6 +45,13 @@ def test_package_transition_uses_optimistic_locking(tmp_path: Path) -> None:
 
     assert transitioned.state is PackageState.INSPECTING
     assert transitioned.version == 2
+    audit = SQLAlchemyAuditRepository(database.session_factory).list_events(
+        package_id=package.id
+    )
+    assert len(audit) == 1
+    assert audit[0].action == "package.state_changed"
+    assert audit[0].details == {"from": "uploaded", "to": "inspecting"}
+    assert audit[0].actor == "service-worker"
     with pytest.raises(VersionConflictError):
         service.transition(
             package.id,

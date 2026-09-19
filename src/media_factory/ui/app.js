@@ -25,7 +25,10 @@ const pipelineGroups = [
   ["Доставка", ["delivery_queued", "uploading_media", "uploading_sidecars", "verifying_delivery", "delivery_failed", "complete"]]
 ];
 
-const appState = { packages: [], assets: new Map(), selectedId: null, busy: false };
+const appState = {
+  packages: [], assets: new Map(), selectedId: null, busy: false,
+  apiKey: sessionStorage.getItem("mediaFactoryApiKey") || ""
+};
 const $ = (selector) => document.querySelector(selector);
 
 function node(tag, className, text) {
@@ -36,7 +39,9 @@ function node(tag, className, text) {
 }
 
 async function api(path, options = {}) {
-  const response = await fetch(path, options);
+  const headers = new Headers(options.headers || {});
+  if (appState.apiKey) headers.set("X-API-Key", appState.apiKey);
+  const response = await fetch(path, { ...options, headers });
   if (!response.ok) {
     let detail = `${response.status} ${response.statusText}`;
     try {
@@ -48,6 +53,13 @@ async function api(path, options = {}) {
   }
   if (response.status === 204) return null;
   return response.json();
+}
+
+async function loadPrincipal() {
+  try {
+    const principal = await api("/api/v1/auth/me");
+    $("#principal").textContent = `${principal.actor} · ${principal.role}`;
+  } catch (_) { $("#principal").textContent = "требуется ключ"; }
 }
 
 function tone(value) {
@@ -156,14 +168,15 @@ async function selectPackage(packageId, updateHash = true) {
   $("#package-detail").hidden = false;
   renderPackageShell(packageItem);
   try {
-    const [asset, jobs, runs] = await Promise.all([
+    const [asset, jobs, runs, audit] = await Promise.all([
       api(`/api/v1/assets/${packageItem.source_asset_id}`),
       api(`/api/v1/packages/${packageId}/jobs`),
-      api(`/api/v1/packages/${packageId}/analysis-runs`)
+      api(`/api/v1/packages/${packageId}/analysis-runs`),
+      api(`/api/v1/packages/${packageId}/audit-events?limit=50`)
     ]);
     if (appState.selectedId !== packageId) return;
     appState.assets.set(asset.id, asset);
-    renderPackageDetails(packageItem, asset, jobs, runs);
+    renderPackageDetails(packageItem, asset, jobs, runs, audit);
   } catch (error) {
     toast(`Ошибка карточки: ${error.message}`, true);
   }
@@ -261,7 +274,7 @@ async function callWorkflow(item, endpoint) {
   });
 }
 
-function renderPackageDetails(item, asset, jobs, runs) {
+function renderPackageDetails(item, asset, jobs, runs, audit) {
   $("#detail-title").textContent = asset.original_name;
   const inspection = asset.inspection;
   const video = inspection?.streams?.find((stream) => stream.codec_type === "video");
@@ -278,6 +291,7 @@ function renderPackageDetails(item, asset, jobs, runs) {
   facts.forEach(([label, value]) => { factsTarget.append(node("dt", "", label), node("dd", "", value)); });
   renderJob(jobs[0]);
   renderHistory(jobs, runs);
+  renderAudit(audit);
 }
 
 function renderJob(job) {
@@ -310,6 +324,23 @@ function renderHistory(jobs, runs) {
     row.append(node("span", "history-kind", jobLabels[job.kind] || job.kind));
     row.append(node("span", "history-error", job.error_message || `${job.progress}% · ${job.state}`));
     row.append(node("time", "history-time", formatDate(job.created_at)));
+    target.append(row);
+  });
+}
+
+function renderAudit(events) {
+  const target = $("#audit-history"); target.replaceChildren();
+  $("#audit-count").textContent = `${events.length} событий`;
+  if (!events.length) { target.append(node("div", "muted", "События появятся после первого изменения.")); return; }
+  events.forEach((event) => {
+    const row = node("div", "history-row");
+    row.append(node("span", "history-dot success"));
+    row.append(node("span", "history-kind", event.action));
+    const detail = event.details.from && event.details.to
+      ? `${event.details.from} → ${event.details.to}`
+      : `${event.actor} · ${event.role}`;
+    row.append(node("span", "history-error audit-copy", detail));
+    row.append(node("time", "history-time", formatDate(event.occurred_at)));
     target.append(row);
   });
 }
@@ -819,12 +850,20 @@ function bindEvents() {
   zone.addEventListener("drop", (event) => uploadFile(event.dataTransfer.files[0]));
   $("#refresh").addEventListener("click", () => loadPackages());
   $("#search").addEventListener("input", (event) => renderPackageList(event.target.value.trim().toLowerCase()));
+  const keyInput = $("#api-key"); keyInput.value = appState.apiKey;
+  keyInput.addEventListener("change", async () => {
+    appState.apiKey = keyInput.value.trim();
+    if (appState.apiKey) sessionStorage.setItem("mediaFactoryApiKey", appState.apiKey);
+    else sessionStorage.removeItem("mediaFactoryApiKey");
+    await loadPrincipal(); await loadPackages();
+  });
   $("#review-close").addEventListener("click", () => $("#review-dialog").close());
   $("#review-dialog").addEventListener("click", (event) => { if (event.target === $("#review-dialog")) $("#review-dialog").close(); });
 }
 
 bindEvents();
 loadHealth();
+loadPrincipal();
 loadPackages({ preserveSelection: false });
 setInterval(loadHealth, 15000);
 setInterval(() => loadPackages(), 10000);

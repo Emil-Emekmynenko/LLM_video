@@ -16,6 +16,8 @@
         <span><strong>Media Factory</strong><small>operator console</small></span>
       </a>
       <div class="topbar-actions">
+        <span class="principal" id="principal">local</span>
+        <input class="api-key-input" id="api-key" type="password" autocomplete="off" placeholder="API key" aria-label="API key доступа">
         <a class="api-link" href="/docs" target="_blank" rel="noreferrer">API Docs ↗</a>
         <div class="health" id="health"><span class="health-dot"></span><span>Проверка…</span></div>
       </div>
@@ -88,6 +90,10 @@
             <article class="info-card history-card">
               <div class="card-title"><h3>История обработки</h3><span id="history-count" class="muted"></span></div>
               <div class="history" id="history"></div>
+            </article>
+            <article class="info-card history-card">
+              <div class="card-title"><h3>Неизменяемый аудит</h3><span id="audit-count" class="muted"></span></div>
+              <div class="history" id="audit-history"></div>
             </article>
           </div>
         </section>

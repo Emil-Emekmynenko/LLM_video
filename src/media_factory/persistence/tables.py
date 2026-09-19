@@ -57,6 +57,29 @@ class PackageRow(Base):
     )
 
 
+class AuditEventRow(Base):
+    __tablename__ = "audit_events"
+    __table_args__ = (
+        Index("ix_audit_events_package_id", "package_id"),
+        Index("ix_audit_events_occurred_at", "occurred_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    actor: Mapped[str] = mapped_column(String(200), nullable=False)
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    action: Mapped[str] = mapped_column(String(160), nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    entity_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    package_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("packages.id"), nullable=True
+    )
+    correlation_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    details: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+
+
 class JobRow(Base):
     __tablename__ = "jobs"
     __table_args__ = (

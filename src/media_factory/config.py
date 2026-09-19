@@ -68,6 +68,10 @@ class Settings(BaseSettings):
     s3_expected_bucket_owner: str | None = None
     gcs_bucket: str = ""
     gcs_project: str | None = None
+    auth_enabled: bool = False
+    operator_api_key: SecretStr = SecretStr("")
+    qa_api_key: SecretStr = SecretStr("")
+    admin_api_key: SecretStr = SecretStr("")
 
 
 @lru_cache(maxsize=1)
