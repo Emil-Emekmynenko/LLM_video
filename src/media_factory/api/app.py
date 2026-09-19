@@ -74,7 +74,7 @@ from media_factory.persistence.qa_repository import (
 from media_factory.persistence.transcription_repository import (
     SQLAlchemyTranscriptionRepository,
 )
-from media_factory.providers.object_storage import FilesystemObjectStorageProvider
+from media_factory.providers.storage_factory import build_object_storage_provider
 from media_factory.services.analysis_review import AnalysisReviewError, AnalysisReviewService
 from media_factory.services.asset_ingest import AssetIngestService
 from media_factory.services.checksum import UploadTooLarge
@@ -344,17 +344,12 @@ def get_delivery_service(
     reviews: SQLAlchemyQARepository = Depends(get_qa_repository),
     deliveries: SQLAlchemyDeliveryRepository = Depends(get_delivery_repository),
 ) -> DeliveryService:
-    if settings.delivery_provider != "filesystem":
-        raise RuntimeError(f"Unsupported delivery provider: {settings.delivery_provider}")
     return DeliveryService(
         packages=SQLAlchemyPackageRepository(database.session_factory),
         builds=builds,
         reviews=reviews,
         deliveries=deliveries,
-        provider=FilesystemObjectStorageProvider(
-            settings.delivery_filesystem_root,
-            chunk_size=settings.delivery_part_size,
-        ),
+        provider=build_object_storage_provider(settings),
     )
 
 
@@ -495,7 +490,6 @@ def create_job(
     transcriptions: TranscriptionService = Depends(get_transcription_service),
     packaging: PackagingService = Depends(get_packaging_service),
     exports: LocalExportService = Depends(get_export_service),
-    deliveries: DeliveryService = Depends(get_delivery_service),
 ) -> Job:
     try:
         if request.kind is JobKind.GENERATE_NARRATION:
@@ -515,10 +509,7 @@ def create_job(
                 raise ExportWorkflowError("export_package requires package_build_id")
             exports.validate_request(package_id, package_build_id)
         elif request.kind is JobKind.DELIVER_PACKAGE:
-            delivery_id = request.payload.get("delivery_id")
-            if not isinstance(delivery_id, str) or not delivery_id:
-                raise DeliveryWorkflowError("deliver_package requires delivery_id")
-            deliveries.validate_job(package_id, delivery_id)
+            raise DeliveryWorkflowError("use the package delivery endpoint")
         return service.create(
             package_id=package_id,
             kind=request.kind,

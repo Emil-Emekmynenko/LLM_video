@@ -16,6 +16,10 @@ class RemoteObjectMissing(RuntimeError):
     code = "remote_object_missing"
 
 
+class RemoteObjectInvalid(RuntimeError):
+    code = "remote_object_invalid"
+
+
 @dataclass(frozen=True)
 class RemoteObject:
     key: str

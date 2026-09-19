@@ -18,15 +18,12 @@ from media_factory.persistence.qa_repository import SQLAlchemyQARepository
 from media_factory.persistence.transcription_repository import (
     SQLAlchemyTranscriptionRepository,
 )
-from media_factory.providers.object_storage import (
-    FilesystemObjectStorageProvider,
-    ObjectStorageProvider,
-)
 from media_factory.providers.speech_recognition import (
     FakeSpeechRecognitionProvider,
     FasterWhisperProvider,
     SpeechRecognitionProvider,
 )
+from media_factory.providers.storage_factory import build_object_storage_provider
 from media_factory.providers.text_to_speech import (
     FakeTextToSpeechProvider,
     TextToSpeechProvider,
@@ -315,20 +312,21 @@ def _execute_delivery(
     packages: SQLAlchemyPackageRepository,
     delivery_id: str,
 ) -> None:
+    deliveries = SQLAlchemyDeliveryRepository(database.session_factory)
+    try:
+        provider = build_object_storage_provider(settings)
+    except Exception as exc:
+        deliveries.fail(
+            delivery_id,
+            code=str(getattr(exc, "code", "delivery_provider_configuration_failed")),
+            message=str(exc),
+        )
+        raise
     service = DeliveryService(
         packages=packages,
         builds=SQLAlchemyPackageBuildRepository(database.session_factory),
         reviews=SQLAlchemyQARepository(database.session_factory),
-        deliveries=SQLAlchemyDeliveryRepository(database.session_factory),
-        provider=_build_delivery_provider(settings),
+        deliveries=deliveries,
+        provider=provider,
     )
     service.deliver(delivery_id)
-
-
-def _build_delivery_provider(settings: Settings) -> ObjectStorageProvider:
-    if settings.delivery_provider == "filesystem":
-        return FilesystemObjectStorageProvider(
-            settings.delivery_filesystem_root,
-            chunk_size=settings.delivery_part_size,
-        )
-    raise RuntimeError(f"Unsupported delivery provider: {settings.delivery_provider}")

@@ -60,6 +60,13 @@ class Settings(BaseSettings):
     delivery_provider: str = "filesystem"
     delivery_filesystem_root: Path = Path("data/deliveries")
     delivery_part_size: int = Field(default=32 * 1024 * 1024, ge=64 * 1024)
+    delivery_timeout_seconds: float = Field(default=120.0, gt=0)
+    s3_bucket: str = ""
+    s3_region: str | None = None
+    s3_endpoint_url: str | None = None
+    s3_expected_bucket_owner: str | None = None
+    gcs_bucket: str = ""
+    gcs_project: str | None = None
 
 
 @lru_cache(maxsize=1)

@@ -27,6 +27,16 @@ dependencies = [
 asr = [
   "faster-whisper>=1.2,<2",
 ]
+delivery-s3 = [
+  "boto3>=1.42,<2",
+]
+delivery-gcs = [
+  "google-cloud-storage>=3.8,<4",
+]
+delivery = [
+  "boto3>=1.42,<2",
+  "google-cloud-storage>=3.8,<4",
+]
 dev = [
   "httpx2>=2,<3",
   "mypy>=1.11,<2",

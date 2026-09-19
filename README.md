@@ -236,11 +236,48 @@ Worker повторно проверяет локальные SHA-256, загр�
 объекты доступны через `GET /api/v1/deliveries/{delivery_id}` и
 `GET /api/v1/deliveries/{delivery_id}/objects`.
 
-В пилотном режиме используется файловый адаптер с тем же контрактом, что и
-будущие S3/GCS-адаптеры. Корень назначения задаётся через
-`MEDIA_FACTORY_DELIVERY_FILESYSTEM_ROOT`, размер потоковой части — через
+В пилотном режиме используется файловый адаптер. Корень назначения задаётся
+через `MEDIA_FACTORY_DELIVERY_FILESYSTEM_ROOT`, размер потоковой части — через
 `MEDIA_FACTORY_DELIVERY_PART_SIZE` (по умолчанию 32 МиБ). Провайдерный код
 изолирован от бизнес-логики доставки.
+
+Для S3 установите optional extra и задайте bucket:
+
+```bash
+.venv/bin/pip install -e '.[delivery-s3]'
+```
+
+```dotenv
+MEDIA_FACTORY_DELIVERY_PROVIDER=s3
+MEDIA_FACTORY_S3_BUCKET=customer-delivery
+MEDIA_FACTORY_S3_REGION=eu-central-1
+```
+
+`MEDIA_FACTORY_S3_ENDPOINT_URL` позволяет подключить S3-совместимый сервис.
+Адаптер использует multipart для больших файлов, SHA-256 каждого part и
+условие `If-None-Match: *` при создании объекта. Существующий ключ приводит к
+ошибке доставки, а не к перезаписи. AWS credentials берутся из стандартной
+credential chain SDK и не должны записываться в `.env` или Git.
+
+Для GCS:
+
+```bash
+.venv/bin/pip install -e '.[delivery-gcs]'
+```
+
+```dotenv
+MEDIA_FACTORY_DELIVERY_PROVIDER=gcs
+MEDIA_FACTORY_GCS_BUCKET=customer-delivery
+MEDIA_FACTORY_GCS_PROJECT=example-project
+```
+
+GCS-адаптер использует resumable upload SDK, checksum-проверку и
+`if_generation_match=0`, поэтому существующий объект не заменяется. Доступ
+получается через Application Default Credentials. Завершённые объекты
+сохраняются в `uploaded_objects` и повторно не передаются; незавершённая
+внутри одного объекта S3 multipart-сессия безопасно прерывается и при новом
+worker-запуске начинается заново. Персистентные межпроцессные checkpoints
+частей остаются отдельным этапом для очень больших объектов.
 
 ## Тесты
 

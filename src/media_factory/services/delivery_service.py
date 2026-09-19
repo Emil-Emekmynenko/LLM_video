@@ -76,21 +76,16 @@ class DeliveryService:
 
     def retry(self, delivery_id: str) -> DeliveryAttempt:
         delivery = self.deliveries.get(delivery_id)
+        self._ensure_provider(delivery)
         if delivery.state is DeliveryState.QUEUED:
             return delivery
         self._validated_build(delivery.package_id, delivery.package_build_id, allow_failed=True)
         return self.deliveries.retry(delivery_id)
 
-    def validate_job(self, package_id: str, delivery_id: str) -> DeliveryAttempt:
-        delivery = self.deliveries.get(delivery_id)
-        if delivery.package_id != package_id or delivery.state is not DeliveryState.QUEUED:
-            raise DeliveryWorkflowError("delivery is not queued for this package")
-        self._validated_build(package_id, delivery.package_build_id, allow_queued=True)
-        return delivery
-
     def deliver(self, delivery_id: str) -> DeliveryAttempt:
         delivery = self.deliveries.get(delivery_id)
         try:
+            self._ensure_provider(delivery)
             build = self._validated_build(
                 delivery.package_id,
                 delivery.package_build_id,
@@ -144,6 +139,15 @@ class DeliveryService:
             except Exception:
                 pass
             raise
+
+    def _ensure_provider(self, delivery: DeliveryAttempt) -> None:
+        if (
+            delivery.provider != self.provider.name
+            or delivery.destination != self.provider.destination
+        ):
+            raise DeliveryWorkflowError(
+                "configured delivery provider does not match the queued attempt"
+            )
 
     def _validated_build(
         self,
@@ -259,6 +263,13 @@ class DeliveryService:
         remote = self.provider.inspect(item.remote_key)
         if remote.size_bytes != item.size_bytes or remote.sha256 != item.sha256:
             raise RemoteVerificationError(f"remote checksum mismatch: {item.remote_key}")
+        if (
+            record.provider_checksum is not None
+            and remote.provider_checksum != record.provider_checksum
+        ):
+            raise RemoteVerificationError(
+                f"remote provider checksum changed: {item.remote_key}"
+            )
 
     @staticmethod
     def _verify_source(

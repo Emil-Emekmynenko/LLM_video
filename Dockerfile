@@ -9,13 +9,15 @@ RUN apt-get update \
 
 WORKDIR /app
 
+ARG MEDIA_FACTORY_EXTRAS=asr,delivery
+
 COPY pyproject.toml README.md ./
 COPY src ./src
 COPY migrations ./migrations
 COPY alembic.ini ./
 COPY scripts ./scripts
 
-RUN python -m pip install --no-cache-dir '.[asr]' \
+RUN python -m pip install --no-cache-dir ".[${MEDIA_FACTORY_EXTRAS}]" \
     && chmod +x /app/scripts/start-api.sh
 
 EXPOSE 8000
