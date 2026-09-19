@@ -96,3 +96,52 @@ class JobRow(Base):
         onupdate=utc_now,
         nullable=False,
     )
+
+
+class AnalysisRunRow(Base):
+    __tablename__ = "analysis_runs"
+    __table_args__ = (Index("ix_analysis_runs_package_id", "package_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    package_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("packages.id"),
+        nullable=False,
+    )
+    source_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(20), nullable=False)
+    provider_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    provider_version: Mapped[str] = mapped_column(String(80), nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(80), nullable=False)
+    proxy_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    processing_manifest: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        nullable=False,
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AnalysisClipRow(Base):
+    __tablename__ = "analysis_clips"
+    __table_args__ = (Index("ix_analysis_clips_run_id", "analysis_run_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    analysis_run_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("analysis_runs.id"),
+        nullable=False,
+    )
+    start_seconds: Mapped[float] = mapped_column(nullable=False)
+    end_seconds: Mapped[float] = mapped_column(nullable=False)
+    clip_path: Mapped[str] = mapped_column(Text, nullable=False)
+    extraction_command: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    result: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        nullable=False,
+    )

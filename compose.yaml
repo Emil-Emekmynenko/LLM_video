@@ -31,6 +31,7 @@ services:
       MEDIA_FACTORY_DATABASE_URL: postgresql+psycopg://media_factory:local-development-only@postgres:5432/media_factory
       MEDIA_FACTORY_UPLOAD_DIR: /data/uploads
       MEDIA_FACTORY_FFPROBE_BIN: ffprobe
+      MEDIA_FACTORY_FFMPEG_BIN: ffmpeg
       MEDIA_FACTORY_AUTO_CREATE_SCHEMA: "false"
       MEDIA_FACTORY_REDIS_URL: redis://redis:6379/0
       MEDIA_FACTORY_QUEUE_NAME: media-tasks
@@ -52,6 +53,7 @@ services:
       MEDIA_FACTORY_DATABASE_URL: postgresql+psycopg://media_factory:local-development-only@postgres:5432/media_factory
       MEDIA_FACTORY_UPLOAD_DIR: /data/uploads
       MEDIA_FACTORY_FFPROBE_BIN: ffprobe
+      MEDIA_FACTORY_FFMPEG_BIN: ffmpeg
       MEDIA_FACTORY_AUTO_CREATE_SCHEMA: "false"
       MEDIA_FACTORY_REDIS_URL: redis://redis:6379/0
       MEDIA_FACTORY_QUEUE_NAME: media-tasks

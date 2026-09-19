@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 class JobKind(StrEnum):
     INSPECT_ASSET = "inspect_asset"
+    ANALYZE_VIDEO = "analyze_video"
 
 
 class JobState(StrEnum):
@@ -36,4 +37,3 @@ class Job(BaseModel):
     finished_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
-

@@ -1,11 +1,16 @@
-from media_factory.config import get_settings
+from media_factory.config import Settings, get_settings
 from media_factory.domain.job import JobKind
 from media_factory.domain.package_state import PackageState
+from media_factory.persistence.analysis_repository import SQLAlchemyAnalysisRepository
 from media_factory.persistence.asset_repository import SQLAlchemyAssetRepository
 from media_factory.persistence.database import Database
 from media_factory.persistence.job_repository import SQLAlchemyJobRepository
 from media_factory.persistence.package_repository import SQLAlchemyPackageRepository
+from media_factory.providers.video_understanding import FakeVideoUnderstandingProvider
+from media_factory.services.analysis_service import AnalysisService
 from media_factory.services.media_inspector import FFprobeMediaInspector, MediaInspectionError
+from media_factory.services.scene_detection import PySceneDetector
+from media_factory.services.video_processing import FFmpegClipExtractor, FFmpegProxyGenerator
 
 
 def execute_job(job_id: str) -> None:
@@ -17,21 +22,12 @@ def execute_job(job_id: str) -> None:
     job = jobs.mark_running(job_id)
 
     try:
-        if job.kind is not JobKind.INSPECT_ASSET:
+        if job.kind is JobKind.INSPECT_ASSET:
+            _execute_inspection(settings.ffprobe_bin, packages, assets, job.package_id)
+        elif job.kind is JobKind.ANALYZE_VIDEO:
+            _execute_analysis(settings, database, packages, assets, job.package_id)
+        else:
             raise UnsupportedJobKind(job.kind.value)
-        package = packages.get(job.package_id)
-        if package.state is not PackageState.INSPECTING:
-            raise InvalidJobState(package.state.value, PackageState.INSPECTING.value)
-        asset = assets.get(package.source_asset_id)
-        inspector = FFprobeMediaInspector(ffprobe_bin=settings.ffprobe_bin)
-        inspection = inspector.inspect(asset.stored_path)
-        assets.update_inspection(asset.id, inspection)
-        target = (
-            PackageState.DUPLICATE_REVIEW
-            if asset.duplicate_of is not None
-            else PackageState.READY_FOR_ANALYSIS
-        )
-        packages.transition(package.id, target=target, expected_version=package.version)
         jobs.mark_succeeded(job.id)
     except MediaInspectionError as exc:
         jobs.mark_failed(job.id, code=exc.code, message=str(exc))
@@ -48,3 +44,51 @@ class UnsupportedJobKind(RuntimeError):
 class InvalidJobState(RuntimeError):
     def __init__(self, current: str, required: str) -> None:
         super().__init__(f"Job requires package state {required}, current state is {current}")
+
+
+def _execute_inspection(
+    ffprobe_bin: str,
+    packages: SQLAlchemyPackageRepository,
+    assets: SQLAlchemyAssetRepository,
+    package_id: str,
+) -> None:
+    package = packages.get(package_id)
+    if package.state is not PackageState.INSPECTING:
+        raise InvalidJobState(package.state.value, PackageState.INSPECTING.value)
+    asset = assets.get(package.source_asset_id)
+    inspector = FFprobeMediaInspector(ffprobe_bin=ffprobe_bin)
+    inspection = inspector.inspect(asset.stored_path)
+    assets.update_inspection(asset.id, inspection)
+    target = (
+        PackageState.DUPLICATE_REVIEW
+        if asset.duplicate_of is not None
+        else PackageState.READY_FOR_ANALYSIS
+    )
+    packages.transition(package.id, target=target, expected_version=package.version)
+
+
+def _execute_analysis(
+    settings: Settings,
+    database: Database,
+    packages: SQLAlchemyPackageRepository,
+    assets: SQLAlchemyAssetRepository,
+    package_id: str,
+) -> None:
+    if settings.vlm_provider != "fake" or not settings.allow_fake_vlm:
+        raise RuntimeError("Configured VLM provider is not available")
+    if settings.environment != "development":
+        raise RuntimeError("Fake VLM provider is forbidden outside development")
+    service = AnalysisService(
+        packages=packages,
+        assets=assets,
+        analyses=SQLAlchemyAnalysisRepository(database.session_factory),
+        proxy_generator=FFmpegProxyGenerator(ffmpeg_bin=settings.ffmpeg_bin),
+        clip_extractor=FFmpegClipExtractor(ffmpeg_bin=settings.ffmpeg_bin),
+        scene_detector=PySceneDetector(),
+        provider=FakeVideoUnderstandingProvider(),
+        proxy_dir=settings.proxy_dir,
+        clip_dir=settings.clip_dir,
+        max_clip_duration=settings.max_clip_duration,
+        clip_overlap=settings.clip_overlap,
+    )
+    service.analyze(package_id)

@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile, status
 
 from media_factory.config import Settings, get_settings
+from media_factory.domain.analysis import AnalysisClip, AnalysisRun
 from media_factory.domain.errors import (
     EntityNotFoundError,
     IdempotencyConflictError,
@@ -15,6 +16,7 @@ from media_factory.domain.job import Job, JobCreate
 from media_factory.domain.models import StoredAsset, Transcript, ValidationIssue
 from media_factory.domain.package import Package, PackageCreate, PackageTransitionRequest
 from media_factory.domain.package_state import InvalidPackageTransition
+from media_factory.persistence.analysis_repository import SQLAlchemyAnalysisRepository
 from media_factory.persistence.asset_repository import SQLAlchemyAssetRepository
 from media_factory.persistence.database import Database
 from media_factory.persistence.job_repository import SQLAlchemyJobRepository
@@ -81,6 +83,12 @@ def get_job_service(
     queue: RedisJobQueue = Depends(get_job_queue),
 ) -> JobService:
     return JobService(SQLAlchemyJobRepository(database.session_factory), queue)
+
+
+def get_analysis_repository(
+    database: Database = Depends(get_database),
+) -> SQLAlchemyAnalysisRepository:
+    return SQLAlchemyAnalysisRepository(database.session_factory)
 
 
 @app.get("/api/v1/health/live")
@@ -236,6 +244,29 @@ def create_job(
 def get_job(job_id: str, service: JobService = Depends(get_job_service)) -> Job:
     try:
         return service.get(job_id)
+    except EntityNotFoundError as exc:
+        raise _not_found(exc) from exc
+
+
+@app.get("/api/v1/analysis-runs/{run_id}", response_model=AnalysisRun)
+def get_analysis_run(
+    run_id: str,
+    repository: SQLAlchemyAnalysisRepository = Depends(get_analysis_repository),
+) -> AnalysisRun:
+    try:
+        return repository.get(run_id)
+    except EntityNotFoundError as exc:
+        raise _not_found(exc) from exc
+
+
+@app.get("/api/v1/analysis-runs/{run_id}/clips", response_model=list[AnalysisClip])
+def list_analysis_clips(
+    run_id: str,
+    repository: SQLAlchemyAnalysisRepository = Depends(get_analysis_repository),
+) -> list[AnalysisClip]:
+    try:
+        repository.get(run_id)
+        return repository.list_clips(run_id)
     except EntityNotFoundError as exc:
         raise _not_found(exc) from exc
 
