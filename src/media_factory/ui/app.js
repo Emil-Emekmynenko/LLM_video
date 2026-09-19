@@ -206,6 +206,7 @@ function renderActions(item) {
 function actionFor(item) {
   if (["uploaded", "inspection_failed"].includes(item.state)) return { label: "Запустить инспекцию", run: startInspection };
   if (["ready_for_analysis", "analysis_failed"].includes(item.state)) return { label: "Запустить анализ", run: (value) => startJob(value, "analyze_video") };
+  if (item.state === "awaiting_metadata_review") return { label: "Проверить анализ", run: openReview };
   if (["master_ready", "transcription_failed", "alignment_failed"].includes(item.state)) return { label: "Создать транскрипт", run: (value) => callWorkflow(value, "transcribe") };
   if (item.state === "validation_failed") return { label: "Повторить сборку", run: (value) => callWorkflow(value, "build") };
   return null;
@@ -309,6 +310,190 @@ function renderHistory(jobs, runs) {
   });
 }
 
+async function openReview(item) {
+  const dialog = $("#review-dialog");
+  $("#review-title").textContent = appState.assets.get(item.source_asset_id)?.original_name || "Анализ и метаданные";
+  $("#review-body").replaceChildren(node("div", "review-empty", "Загрузка результатов…"));
+  dialog.showModal();
+  await loadReview(item);
+}
+
+async function loadReview(item) {
+  try {
+    const runs = await api(`/api/v1/packages/${item.id}/analysis-runs`);
+    const run = runs[0];
+    if (!run) throw new Error("Для комплекта нет analysis run");
+    if (run.review_status === "pending") {
+      const events = await api(`/api/v1/analysis-runs/${run.id}/events`);
+      renderEventReview(item, run, events);
+      return;
+    }
+    if (run.review_status === "rejected") {
+      $("#review-body").replaceChildren(node("div", "review-empty", "Анализ отклонён. Комплект возвращён на повторный анализ."));
+      return;
+    }
+    await loadMetadataReview(item, run);
+  } catch (error) {
+    $("#review-body").replaceChildren(node("div", "review-empty", error.message));
+  }
+}
+
+function actionButton(label, className, callback) {
+  const button = node("button", `button ${className}`, label);
+  button.type = "button";
+  button.addEventListener("click", callback);
+  return button;
+}
+
+function renderEventReview(item, run, events) {
+  $("#review-kicker").textContent = `Analysis run · ${run.provider_name} · ${run.prompt_version}`;
+  const body = $("#review-body");
+  body.replaceChildren();
+  const intro = node("div", "review-intro");
+  intro.append(node("p", "", "Проверьте evidence и таймкод каждого события. В метаданные попадут только принятые события."));
+  const actions = node("div", "review-actions");
+  const unresolved = events.filter((event) => !["approved", "rejected"].includes(event.review_status));
+  if (unresolved.length) actions.append(actionButton("Принять все", "button-secondary", () => reviewAllEvents(item, run, unresolved)));
+  actions.append(actionButton("Отклонить run", "button-secondary", () => reviewRun(item, run, false)));
+  if (!unresolved.length) actions.append(actionButton("Утвердить run", "button-primary", () => reviewRun(item, run, true)));
+  intro.append(actions); body.append(intro);
+  const list = node("div", "event-list");
+  events.forEach((event) => {
+    const card = node("article", "event-card");
+    card.append(node("div", "event-time", `${event.start.toFixed(2)} — ${event.end.toFixed(2)} с`));
+    const main = node("div", "event-main");
+    main.append(node("h4", "", `${event.actor} · ${event.action}`));
+    main.append(node("p", "", event.evidence.join(" ") || "Evidence не указано"));
+    const meta = node("div", "event-meta");
+    [...event.objects, `confidence ${(event.confidence * 100).toFixed(0)}%`].forEach((value) => meta.append(node("span", "", value)));
+    main.append(meta); card.append(main);
+    if (["approved", "rejected"].includes(event.review_status)) {
+      card.append(node("div", `event-status ${event.review_status}`, event.review_status === "approved" ? "Принято" : "Отклонено"));
+    } else {
+      const buttons = node("div", "event-buttons");
+      const approve = node("button", "", "✓"); approve.title = "Принять";
+      const reject = node("button", "", "×"); reject.title = "Отклонить";
+      approve.addEventListener("click", () => reviewEvent(item, run, event, "approved"));
+      reject.addEventListener("click", () => reviewEvent(item, run, event, "rejected"));
+      buttons.append(approve, reject); card.append(buttons);
+    }
+    list.append(card);
+  });
+  body.append(list);
+}
+
+async function reviewEvent(item, run, event, reviewStatus) {
+  try {
+    await api(`/api/v1/analysis-events/${event.id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ review_status: reviewStatus, expected_version: event.version })
+    });
+    await loadReview(item);
+  } catch (error) { toast(error.message, true); }
+}
+
+async function reviewAllEvents(item, run, events) {
+  try {
+    for (const event of events) {
+      await api(`/api/v1/analysis-events/${event.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ review_status: "approved", expected_version: event.version })
+      });
+    }
+    await loadReview(item);
+  } catch (error) { toast(error.message, true); }
+}
+
+async function reviewRun(item, run, approved) {
+  try {
+    await api(`/api/v1/analysis-runs/${run.id}/reviews`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ approved })
+    });
+    if (approved) await loadMetadataReview(item, { ...run, review_status: "approved" });
+    else { $("#review-dialog").close(); await loadPackages(); }
+  } catch (error) { toast(error.message, true); }
+}
+
+async function loadMetadataReview(item, run) {
+  try {
+    const [versions, categories] = await Promise.all([
+      api(`/api/v1/packages/${item.id}/metadata`), api("/api/v1/metadata/categories")
+    ]);
+    if (!versions.length) {
+      const body = $("#review-body"); body.replaceChildren();
+      const intro = node("div", "review-intro");
+      intro.append(node("p", "", "Анализ утверждён. Создайте черновик метаданных из принятых событий."));
+      intro.append(actionButton("Создать черновик", "button-primary", () => createMetadataProposal(item, run)));
+      body.append(intro); return;
+    }
+    renderMetadataForm(item, run, versions.at(-1), categories);
+  } catch (error) { toast(error.message, true); }
+}
+
+async function createMetadataProposal(item, run) {
+  try {
+    await api(`/api/v1/packages/${item.id}/metadata/proposals`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ analysis_run_id: run.id })
+    });
+    await loadMetadataReview(item, run);
+  } catch (error) { toast(error.message, true); }
+}
+
+function formField(label, control) {
+  const field = node("div", "field"); field.append(node("label", "", label), control); return field;
+}
+
+function renderMetadataForm(item, run, metadata, categories) {
+  $("#review-kicker").textContent = `Метаданные · версия ${metadata.version}`;
+  const body = $("#review-body"); body.replaceChildren();
+  const form = node("form", "metadata-form");
+  const title = node("input"); title.value = metadata.title; title.required = true; title.maxLength = 200;
+  const description = node("textarea"); description.value = metadata.description; description.required = true; description.maxLength = 5000;
+  const category = node("select"); categories.forEach((value) => { const option = node("option", "", value.label); option.value = value.code; option.selected = value.code === metadata.category; category.append(option); });
+  const language = node("input"); language.value = metadata.narration_language || ""; language.placeholder = "ru, en-US или пусто";
+  const chapters = node("textarea"); chapters.value = metadata.chapters.map((value) => `${value.start} | ${value.title}`).join("\n"); chapters.placeholder = "0 | Введение";
+  const grid = node("div", "field-grid"); grid.append(formField("Категория", category), formField("Язык озвучки", language));
+  form.append(formField("Заголовок", title), formField("Описание", description), grid, formField("Главы: секунда | название", chapters));
+  form.append(node("div", "form-note", "Технические поля — duration, resolution, SHA-256 и WPM — будут вычислены из финальных артефактов и не редактируются вручную."));
+  const actions = node("div", "review-actions");
+  actions.append(actionButton("Сохранить новую версию", "button-secondary", () => saveMetadata(item, run, metadata, { title, description, category, language, chapters })));
+  actions.append(actionButton("Утвердить версию", "button-primary", () => approveMetadata(metadata)));
+  form.append(actions); body.append(form);
+}
+
+function parseChapters(value) {
+  if (!value.trim()) return [];
+  return value.split("\n").filter((line) => line.trim()).map((line) => {
+    const separator = line.indexOf("|");
+    if (separator < 1) throw new Error(`Неверная глава: ${line}`);
+    const start = Number(line.slice(0, separator).trim());
+    const title = line.slice(separator + 1).trim();
+    if (!Number.isFinite(start) || start < 0 || !title) throw new Error(`Неверная глава: ${line}`);
+    return { start, title };
+  }).sort((left, right) => left.start - right.start);
+}
+
+async function saveMetadata(item, run, metadata, controls) {
+  try {
+    const payload = {
+      base_version: metadata.version, title: controls.title.value.trim(), description: controls.description.value.trim(),
+      category: controls.category.value, chapters: parseChapters(controls.chapters.value),
+      narration_language: controls.language.value.trim() || null, created_by: "operator", change_note: "Edited in operator console"
+    };
+    await api(`/api/v1/metadata/${metadata.id}/revisions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    toast("Новая версия метаданных сохранена"); await loadMetadataReview(item, run);
+  } catch (error) { toast(error.message, true); }
+}
+
+async function approveMetadata(metadata) {
+  try {
+    await api(`/api/v1/metadata/${metadata.id}/approve`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expected_version: metadata.version })
+    });
+    $("#review-dialog").close(); toast("Метаданные утверждены"); await loadPackages();
+  } catch (error) { toast(error.message, true); }
+}
+
 async function uploadFile(file) {
   if (!file || (!file.name.toLowerCase().endsWith(".mp4") && file.type !== "video/mp4")) {
     toast("Выберите MP4-файл", true); return;
@@ -340,6 +525,8 @@ function bindEvents() {
   zone.addEventListener("drop", (event) => uploadFile(event.dataTransfer.files[0]));
   $("#refresh").addEventListener("click", () => loadPackages());
   $("#search").addEventListener("input", (event) => renderPackageList(event.target.value.trim().toLowerCase()));
+  $("#review-close").addEventListener("click", () => $("#review-dialog").close());
+  $("#review-dialog").addEventListener("click", (event) => { if (event.target === $("#review-dialog")) $("#review-dialog").close(); });
 }
 
 bindEvents();

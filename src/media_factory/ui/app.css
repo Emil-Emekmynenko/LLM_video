@@ -134,6 +134,40 @@ dt { color: var(--muted); } dd { margin: 0; text-align: right; overflow-wrap: an
 .toast { position: fixed; right: 26px; bottom: 26px; z-index: 50; max-width: min(420px, calc(100vw - 52px)); padding: 14px 17px; border: 1px solid rgba(215, 255, 63, .28); border-radius: 12px; background: #171c19; box-shadow: 0 20px 60px rgba(0, 0, 0, .4); font-size: 13px; line-height: 1.45; }
 .toast.error { border-color: rgba(255, 107, 107, .35); background: #211717; }
 
+.review-dialog { width: min(1040px, calc(100% - 32px)); max-height: calc(100vh - 32px); padding: 0; color: var(--text); border: 1px solid var(--line); border-radius: 20px; background: #101318; box-shadow: 0 35px 120px rgba(0, 0, 0, .7); }
+.review-dialog::backdrop { background: rgba(2, 4, 6, .78); backdrop-filter: blur(8px); }
+.review-shell { min-height: 520px; }
+.review-head { position: sticky; top: 0; z-index: 2; display: flex; justify-content: space-between; align-items: flex-start; padding: 25px 28px 20px; background: rgba(16, 19, 24, .94); border-bottom: 1px solid var(--line); backdrop-filter: blur(15px); }
+.review-head h2 { margin: 0; font-size: 27px; letter-spacing: -.04em; }
+.dialog-close { width: 38px; height: 38px; border: 1px solid var(--line); border-radius: 11px; color: var(--muted); background: transparent; cursor: pointer; font-size: 25px; line-height: 1; }
+.dialog-close:hover { color: var(--text); }
+.review-body { padding: 26px 28px 32px; }
+.review-intro { display: flex; justify-content: space-between; gap: 20px; align-items: center; margin-bottom: 20px; }
+.review-intro p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.55; max-width: 650px; }
+.review-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.event-list { display: grid; gap: 9px; }
+.event-card { display: grid; grid-template-columns: 92px minmax(0, 1fr) auto; gap: 16px; padding: 16px; border: 1px solid var(--line); border-radius: 13px; background: rgba(255, 255, 255, .018); }
+.event-time { color: var(--accent); font: 700 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.event-main h4 { margin: 0 0 6px; font-size: 14px; }
+.event-main p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.event-meta { margin-top: 9px; display: flex; gap: 7px; flex-wrap: wrap; }
+.event-meta span { padding: 3px 6px; border-radius: 6px; background: rgba(255, 255, 255, .05); color: #a9b0b8; font-size: 10px; }
+.event-buttons { display: flex; align-items: center; gap: 6px; }
+.event-buttons button { width: 34px; height: 34px; border-radius: 9px; border: 1px solid var(--line); color: var(--muted); background: #161a20; cursor: pointer; }
+.event-buttons button:hover { color: var(--text); border-color: rgba(215, 255, 63, .3); }
+.event-status { min-width: 90px; align-self: center; text-align: right; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
+.event-status.approved { color: var(--accent); }
+.event-status.rejected { color: var(--danger); }
+.metadata-form { display: grid; gap: 17px; }
+.field { display: grid; gap: 7px; }
+.field label { color: #b1b7bf; font-size: 11px; font-weight: 750; text-transform: uppercase; letter-spacing: .07em; }
+.field input, .field textarea, .field select { width: 100%; color: var(--text); background: #0b0e12; border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; outline: none; }
+.field textarea { min-height: 108px; resize: vertical; line-height: 1.5; }
+.field input:focus, .field textarea:focus, .field select:focus { border-color: rgba(215, 255, 63, .45); }
+.field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.form-note { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.review-empty { padding: 70px 20px; text-align: center; color: var(--muted); }
+
 @media (max-width: 950px) {
   .hero { display: block; padding-top: 56px; }
   .stats { margin-top: 42px; max-width: 460px; }
@@ -157,4 +191,11 @@ dt { color: var(--muted); } dd { margin: 0; text-align: right; overflow-wrap: an
   .detail-grid { grid-template-columns: 1fr; }
   .history-row { grid-template-columns: 7px 1fr auto; }
   .history-error { grid-column: 2 / -1; }
+  .review-dialog { width: calc(100% - 16px); max-height: calc(100vh - 16px); }
+  .review-head, .review-body { padding-left: 17px; padding-right: 17px; }
+  .review-intro { display: block; }
+  .review-actions { margin-top: 15px; }
+  .event-card { grid-template-columns: 70px 1fr; }
+  .event-buttons, .event-status { grid-column: 2; justify-content: flex-start; text-align: left; }
+  .field-grid { grid-template-columns: 1fr; }
 }
