@@ -64,6 +64,8 @@ def test_operator_console_and_static_assets_are_served() -> None:
     assert "loadPackages" in script.text
     assert "renderEventReview" in script.text
     assert "renderNarrationReview" in script.text
+    assert "renderQa" in script.text
+    assert "renderRelease" in script.text
 
 
 def test_readiness_reports_each_dependency() -> None:

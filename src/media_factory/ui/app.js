@@ -211,6 +211,8 @@ function actionFor(item) {
   if (["master_building", "master_failed"].includes(item.state)) return { label: "Собрать master", run: (value) => callWorkflow(value, "build-master") };
   if (["master_ready", "transcription_failed", "alignment_failed"].includes(item.state)) return { label: "Создать транскрипт", run: (value) => callWorkflow(value, "transcribe") };
   if (["packaging", "validation_failed"].includes(item.state)) return { label: item.state === "packaging" ? "Собрать комплект" : "Повторить сборку", run: (value) => callWorkflow(value, "build") };
+  if (item.state === "awaiting_qa") return { label: "Провести QA", run: openQa };
+  if (["validated", "delivery_failed", "complete"].includes(item.state)) return { label: item.state === "complete" ? "Открыть результат" : "Экспорт и доставка", run: openRelease };
   return null;
 }
 
@@ -636,6 +638,154 @@ async function decideAudio(item, policy, audioTrackId = null) {
     });
     $("#review-dialog").close(); toast("Решение по аудио сохранено, master поставлен в сборку"); await loadPackages();
   } catch (error) { toast(error.message, true); await loadPackages(); }
+}
+
+async function openQa(item) {
+  const dialog = $("#review-dialog");
+  $("#review-title").textContent = appState.assets.get(item.source_asset_id)?.original_name || "QA комплекта";
+  $("#review-body").replaceChildren(node("div", "review-empty", "Загрузка сборки…"));
+  dialog.showModal();
+  try {
+    const builds = await api(`/api/v1/packages/${item.id}/builds`);
+    const build = builds.at(-1);
+    if (!build) throw new Error("Сборка комплекта не найдена");
+    renderQa(item, build);
+  } catch (error) { $("#review-body").replaceChildren(node("div", "review-empty", error.message)); }
+}
+
+function renderQa(item, build) {
+  $("#review-kicker").textContent = `QA · сборка v${build.version} · схема ${build.schema_version}`;
+  const body = $("#review-body"); body.replaceChildren();
+  const summary = node("div", "qa-summary");
+  const metadata = build.computed_metadata || {};
+  const facts = [
+    ["Название", metadata.Title], ["Категория", metadata.Category], ["Длительность", metadata.Duration != null ? `${metadata.Duration.toFixed(2)} с` : "—"],
+    ["Разрешение", metadata.Resolution], ["Язык", metadata.Language || "—"], ["WPM", metadata.WPM != null ? metadata.WPM.toFixed(1) : "—"]
+  ];
+  facts.forEach(([label, value]) => {
+    const fact = node("div", "qa-fact"); fact.append(node("span", "", label), node("strong", "", value || "—")); summary.append(fact);
+  });
+  body.append(summary);
+  const files = node("section", "qa-section"); files.append(node("h3", "", `Файлы · ${build.files.length}`));
+  const fileList = node("div", "file-list");
+  build.files.forEach((file) => {
+    const row = node("div", "file-row");
+    row.append(node("span", "file-role", file.role), node("span", "file-name", file.filename), node("span", "file-size", formatBytes(file.size_bytes)));
+    fileList.append(row);
+  });
+  files.append(fileList); body.append(files);
+  if (build.validation_issues.length) {
+    const issues = node("section", "qa-section"); issues.append(node("h3", "", "Замечания валидации"));
+    build.validation_issues.forEach((issue) => issues.append(node("p", issue.blocking ? "error-copy" : "form-note", `${issue.code}: ${issue.message}`)));
+    body.append(issues);
+  }
+  const reason = node("textarea"); reason.placeholder = "Причина отклонения (обязательна только при reject)"; reason.maxLength = 2000;
+  body.append(formField("Комментарий QA", reason));
+  const actions = node("div", "review-actions");
+  actions.append(actionButton("Отклонить сборку", "button-secondary", () => submitQa(item, build, false, reason.value)));
+  actions.append(actionButton("Утвердить сборку", "button-primary", () => submitQa(item, build, true, reason.value)));
+  body.append(actions);
+}
+
+async function submitQa(item, build, approved, reason) {
+  try {
+    await api(`/api/v1/packages/${item.id}/approve`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ package_build_id: build.id, approved, reviewer: "operator", reason: reason.trim() || null })
+    });
+    $("#review-dialog").close(); toast(approved ? "Сборка прошла QA" : "Сборка отклонена"); await loadPackages();
+  } catch (error) { toast(error.message, true); }
+}
+
+async function openRelease(item) {
+  const dialog = $("#review-dialog");
+  $("#review-title").textContent = appState.assets.get(item.source_asset_id)?.original_name || "Экспорт и доставка";
+  $("#review-body").replaceChildren(node("div", "review-empty", "Загрузка результата…"));
+  dialog.showModal();
+  await loadRelease(item);
+}
+
+async function loadRelease(item) {
+  try {
+    const [builds, reviews, deliveries] = await Promise.all([
+      api(`/api/v1/packages/${item.id}/builds`),
+      api(`/api/v1/packages/${item.id}/qa-reviews`),
+      api(`/api/v1/deliveries?package_id=${encodeURIComponent(item.id)}`)
+    ]);
+    const approvedReview = [...reviews].reverse().find((value) => value.decision === "approved");
+    const build = approvedReview ? builds.find((value) => value.id === approvedReview.package_build_id) : builds.at(-1);
+    if (!build) throw new Error("Утверждённая сборка не найдена");
+    const exports = await api(`/api/v1/package-builds/${build.id}/exports`);
+    renderRelease(item, build, exports, deliveries);
+  } catch (error) { $("#review-body").replaceChildren(node("div", "review-empty", error.message)); }
+}
+
+function renderRelease(item, build, exports, deliveries) {
+  $("#review-kicker").textContent = `Результат · ${build.customer} · ${build.base_name}`;
+  const body = $("#review-body"); body.replaceChildren();
+  const intro = node("div", "review-intro");
+  intro.append(node("p", "", "ZIP остаётся локальным артефактом. Доставка отправляет сначала master, затем sidecars и проверяет размеры и SHA-256."));
+  body.append(intro);
+
+  const exportSection = node("section", "qa-section"); exportSection.append(node("h3", "", "Локальный ZIP"));
+  const completedExport = [...exports].reverse().find((value) => value.state === "succeeded");
+  const activeExport = [...exports].reverse().find((value) => value.state === "running");
+  if (completedExport) {
+    const row = node("div", "release-row");
+    row.append(node("span", "", `${formatBytes(completedExport.archive_size_bytes)} · SHA ${completedExport.archive_sha256.slice(0, 12)}…`));
+    const link = node("a", "button button-secondary", "Скачать ZIP"); link.href = `/api/v1/exports/${completedExport.id}/download`; row.append(link); exportSection.append(row);
+  } else if (activeExport) {
+    exportSection.append(node("p", "muted", "ZIP создаётся фоновым заданием…"));
+  } else {
+    exportSection.append(actionButton("Создать ZIP", "button-secondary", () => createExport(item, build)));
+  }
+  body.append(exportSection);
+
+  const deliverySection = node("section", "qa-section"); deliverySection.append(node("h3", "", "Доставка"));
+  const delivery = deliveries.at(-1);
+  if (delivery) {
+    const status = node("div", "delivery-status");
+    status.append(node("span", `badge ${tone(delivery.state)}`, delivery.state));
+    status.append(node("span", "muted", `${delivery.provider} → ${delivery.destination}${delivery.prefix ? `/${delivery.prefix}` : ""}`));
+    deliverySection.append(status);
+    if (delivery.error_message) deliverySection.append(node("p", "error-copy", `${delivery.error_code}: ${delivery.error_message}`));
+    if (delivery.state === "failed") deliverySection.append(actionButton("Повторить доставку", "button-primary", () => retryDelivery(item, delivery)));
+    if (delivery.state === "complete") deliverySection.append(node("p", "form-note", `Комплект доставлен ${formatDate(delivery.package_complete_at)}. Удалённые файлы не перезаписываются и не удаляются.`));
+  } else {
+    const prefix = node("input"); prefix.placeholder = "Необязательный безопасный префикс";
+    deliverySection.append(formField("Папка назначения", prefix));
+    deliverySection.append(actionButton("Запустить доставку", "button-primary", () => createDelivery(item, build, prefix.value)));
+  }
+  body.append(deliverySection);
+}
+
+async function createExport(item, build) {
+  try {
+    await api(`/api/v1/package-builds/${build.id}/exports`, {
+      method: "POST", headers: { "Idempotency-Key": `export-${build.id}-${crypto.randomUUID()}` }
+    });
+    toast("ZIP поставлен в очередь"); await loadRelease(item);
+  } catch (error) { toast(error.message, true); }
+}
+
+async function createDelivery(item, build, prefix) {
+  try {
+    await api(`/api/v1/packages/${item.id}/deliver`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": `delivery-${build.id}-${crypto.randomUUID()}` },
+      body: JSON.stringify({ package_build_id: build.id, prefix: prefix.trim() })
+    });
+    $("#review-dialog").close(); toast("Доставка поставлена в очередь"); await loadPackages();
+  } catch (error) { toast(error.message, true); }
+}
+
+async function retryDelivery(item, delivery) {
+  try {
+    await api(`/api/v1/deliveries/${delivery.id}/retry`, {
+      method: "POST", headers: { "Idempotency-Key": `retry-${delivery.id}-${crypto.randomUUID()}` }
+    });
+    $("#review-dialog").close(); toast("Повторная доставка поставлена в очередь"); await loadPackages();
+  } catch (error) { toast(error.message, true); }
 }
 
 async function uploadFile(file) {
