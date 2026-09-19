@@ -29,6 +29,7 @@
 - версионная сборка metadata/transcript/manifest и автоприёмка до QA;
 - операторская QA-приёмка конкретной версии сборки;
 - потоковый локальный ZIP-экспорт только после успешной QA-приёмки;
+- управляемая доставка master → sidecars с удалённой сверкой и безопасным retry;
 
 ## Требования
 
@@ -210,6 +211,36 @@ curl -X POST http://127.0.0.1:8000/api/v1/package-builds/<package-build-id>/expo
 перезаписываются. Состояние экспорта доступно через
 `GET /api/v1/package-builds/{package_build_id}/exports`, готовый файл — через
 `GET /api/v1/exports/{export_id}/download`.
+
+## Доставка комплекта
+
+Доставка запускается только для последней одобренной версии сборки:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/packages/<package-id>/deliver \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: delivery-<package-build-id>-v1' \
+  -d '{"package_build_id":"<package-build-id>","prefix":"2026/customer/session"}'
+```
+
+Worker повторно проверяет локальные SHA-256, загружает единственный master и
+только после его подтверждения начинает sidecar-файлы. Затем каждый удалённый
+объект сверяется по размеру и SHA-256. Состояние `complete` и
+`package_complete_at` устанавливаются только после успешной сверки всего
+комплекта. Существующие удалённые ключи не перезаписываются и не удаляются.
+
+Неудачная попытка сохраняет уже подтверждённые объекты. Повтор запускается с
+новым ключом идемпотентности через
+`POST /api/v1/deliveries/{delivery_id}/retry`; ранее записанный master
+проверяется на стороне назначения и не загружается заново. Статус и фактические
+объекты доступны через `GET /api/v1/deliveries/{delivery_id}` и
+`GET /api/v1/deliveries/{delivery_id}/objects`.
+
+В пилотном режиме используется файловый адаптер с тем же контрактом, что и
+будущие S3/GCS-адаптеры. Корень назначения задаётся через
+`MEDIA_FACTORY_DELIVERY_FILESYSTEM_ROOT`, размер потоковой части — через
+`MEDIA_FACTORY_DELIVERY_PART_SIZE` (по умолчанию 32 МиБ). Провайдерный код
+изолирован от бизнес-логики доставки.
 
 ## Тесты
 

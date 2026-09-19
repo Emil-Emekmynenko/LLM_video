@@ -12,6 +12,7 @@ from media_factory.persistence.tables import (  # noqa: F401
     AssetRow,
     AudioDecisionRow,
     AudioTrackRow,
+    DeliveryAttemptRow,
     JobRow,
     LocalExportRow,
     MasterBuildRow,
@@ -23,6 +24,7 @@ from media_factory.persistence.tables import (  # noqa: F401
     QAReviewRow,
     TranscriptionRunRow,
     TTSRunRow,
+    UploadedObjectRow,
 )
 
 config = context.config

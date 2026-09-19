@@ -26,6 +26,12 @@ class PackageService:
         target: PackageState,
         expected_version: int,
     ) -> Package:
+        current = self.repository.get(package_id)
+        if current.version != expected_version:
+            from media_factory.domain.errors import VersionConflictError
+
+            raise VersionConflictError("package", package_id, expected_version)
+        ensure_transition_allowed(current.state, target)
         if target in {
             PackageState.GENERATING_NARRATION,
             PackageState.MASTER_BUILDING,
@@ -39,14 +45,14 @@ class PackageService:
             PackageState.VALIDATION_FAILED,
             PackageState.AWAITING_QA,
             PackageState.VALIDATED,
+            PackageState.DELIVERY_QUEUED,
+            PackageState.UPLOADING_MEDIA,
+            PackageState.UPLOADING_SIDECARS,
+            PackageState.VERIFYING_DELIVERY,
+            PackageState.DELIVERY_FAILED,
+            PackageState.COMPLETE,
         }:
             raise GuardedPackageTransition(target)
-        current = self.repository.get(package_id)
-        if current.version != expected_version:
-            from media_factory.domain.errors import VersionConflictError
-
-            raise VersionConflictError("package", package_id, expected_version)
-        ensure_transition_allowed(current.state, target)
         return self.repository.transition(
             package_id,
             target=target,

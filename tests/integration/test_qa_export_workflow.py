@@ -1,16 +1,19 @@
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from zipfile import ZipFile
 
 import pytest
 from pydantic import ValidationError
 
+from media_factory.domain.delivery import DeliveryCreateRequest, DeliveryState
 from media_factory.domain.models import StoredAsset
 from media_factory.domain.package_state import PackageState
 from media_factory.domain.packaging import DeliveryMetadata, PackageBuild, PackageFile
 from media_factory.domain.qa import ExportState, QADecision, QAReviewRequest
 from media_factory.persistence.asset_repository import SQLAlchemyAssetRepository
 from media_factory.persistence.database import Database
+from media_factory.persistence.delivery_repository import SQLAlchemyDeliveryRepository
 from media_factory.persistence.export_repository import SQLAlchemyExportRepository
 from media_factory.persistence.package_build_repository import (
     SQLAlchemyPackageBuildRepository,
@@ -18,7 +21,9 @@ from media_factory.persistence.package_build_repository import (
 from media_factory.persistence.package_repository import SQLAlchemyPackageRepository
 from media_factory.persistence.qa_repository import SQLAlchemyQARepository
 from media_factory.persistence.tables import PackageRow
+from media_factory.providers.object_storage import RemoteObject
 from media_factory.services.checksum import sha256_file
+from media_factory.services.delivery_service import DeliveryService
 from media_factory.services.export_service import (
     ExportAlreadyExists,
     ExportWorkflowError,
@@ -26,6 +31,42 @@ from media_factory.services.export_service import (
 )
 from media_factory.services.package_artifacts import write_deterministic_json
 from media_factory.services.qa_service import QAArtifactMismatch, QAService
+
+
+@dataclass
+class MemoryDeliveryProvider:
+    name: str = "memory"
+    destination: str = "memory://test-bucket"
+
+    def __post_init__(self) -> None:
+        self.objects: dict[str, RemoteObject] = {}
+        self.uploaded_keys: list[str] = []
+        self.fail_suffix: str | None = None
+
+    def upload_if_absent(
+        self,
+        source: Path,
+        key: str,
+        *,
+        expected_size: int,
+        expected_sha256: str,
+    ) -> RemoteObject:
+        if self.fail_suffix is not None and key.endswith(self.fail_suffix):
+            raise RuntimeError("simulated interrupted upload")
+        if key in self.objects:
+            raise RuntimeError("remote object already exists")
+        remote = RemoteObject(
+            key=key,
+            size_bytes=expected_size,
+            sha256=expected_sha256,
+            provider_checksum=expected_sha256,
+        )
+        self.objects[key] = remote
+        self.uploaded_keys.append(key)
+        return remote
+
+    def inspect(self, key: str) -> RemoteObject:
+        return self.objects[key]
 
 
 def prepare_package_build(tmp_path: Path) -> tuple[
@@ -237,3 +278,79 @@ def test_rejection_requires_reason() -> None:
             approved=False,
             reviewer="qa@example.test",
         )
+
+
+def test_delivery_uploads_media_first_and_verifies_complete_package(tmp_path: Path) -> None:
+    database, packages, builds, reviews, build = prepare_package_build(tmp_path)
+    QAService(packages=packages, builds=builds, reviews=reviews).review(
+        build.package_id,
+        QAReviewRequest(
+            package_build_id=build.id,
+            approved=True,
+            reviewer="qa@example.test",
+        ),
+    )
+    repository = SQLAlchemyDeliveryRepository(database.session_factory)
+    provider = MemoryDeliveryProvider()
+    service = DeliveryService(
+        packages=packages,
+        builds=builds,
+        reviews=reviews,
+        deliveries=repository,
+        provider=provider,
+    )
+    delivery = service.create(
+        build.package_id,
+        DeliveryCreateRequest(package_build_id=build.id, prefix="2026/test"),
+        idempotency_key="delivery-1",
+    )
+
+    completed = service.deliver(delivery.id)
+
+    assert completed.state is DeliveryState.COMPLETE
+    assert packages.get(build.package_id).state is PackageState.COMPLETE
+    assert completed.media_uploaded_at is not None
+    assert completed.sidecars_uploaded_at is not None
+    assert completed.package_complete_at is not None
+    assert provider.uploaded_keys[0].endswith(".mp4")
+    assert all(item.verified_at is not None for item in repository.list_objects(delivery.id))
+
+
+def test_delivery_retry_resumes_after_media_without_reuploading_it(tmp_path: Path) -> None:
+    database, packages, builds, reviews, build = prepare_package_build(tmp_path)
+    QAService(packages=packages, builds=builds, reviews=reviews).review(
+        build.package_id,
+        QAReviewRequest(
+            package_build_id=build.id,
+            approved=True,
+            reviewer="qa@example.test",
+        ),
+    )
+    repository = SQLAlchemyDeliveryRepository(database.session_factory)
+    provider = MemoryDeliveryProvider()
+    provider.fail_suffix = ".transcript.json"
+    service = DeliveryService(
+        packages=packages,
+        builds=builds,
+        reviews=reviews,
+        deliveries=repository,
+        provider=provider,
+    )
+    delivery = service.create(
+        build.package_id,
+        DeliveryCreateRequest(package_build_id=build.id),
+        idempotency_key="delivery-retry",
+    )
+
+    with pytest.raises(RuntimeError, match="interrupted"):
+        service.deliver(delivery.id)
+
+    assert repository.get(delivery.id).state is DeliveryState.FAILED
+    assert packages.get(build.package_id).state is PackageState.DELIVERY_FAILED
+    master_key = provider.uploaded_keys[0]
+    provider.fail_suffix = None
+    service.retry(delivery.id)
+    completed = service.deliver(delivery.id)
+
+    assert completed.state is DeliveryState.COMPLETE
+    assert provider.uploaded_keys.count(master_key) == 1

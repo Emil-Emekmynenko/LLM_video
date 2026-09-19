@@ -99,7 +99,9 @@ ALLOWED_TRANSITIONS: dict[PackageState, frozenset[PackageState]] = {
         {PackageState.VALIDATED, PackageState.VALIDATION_FAILED}
     ),
     PackageState.VALIDATED: frozenset({PackageState.DELIVERY_QUEUED}),
-    PackageState.DELIVERY_QUEUED: frozenset({PackageState.UPLOADING_MEDIA}),
+    PackageState.DELIVERY_QUEUED: frozenset(
+        {PackageState.UPLOADING_MEDIA, PackageState.DELIVERY_FAILED}
+    ),
     PackageState.UPLOADING_MEDIA: frozenset(
         {PackageState.UPLOADING_SIDECARS, PackageState.DELIVERY_FAILED}
     ),

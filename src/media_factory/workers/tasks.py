@@ -4,6 +4,7 @@ from media_factory.domain.package_state import PackageState
 from media_factory.persistence.analysis_repository import SQLAlchemyAnalysisRepository
 from media_factory.persistence.asset_repository import SQLAlchemyAssetRepository
 from media_factory.persistence.database import Database
+from media_factory.persistence.delivery_repository import SQLAlchemyDeliveryRepository
 from media_factory.persistence.export_repository import SQLAlchemyExportRepository
 from media_factory.persistence.job_repository import SQLAlchemyJobRepository
 from media_factory.persistence.master_repository import SQLAlchemyMasterRepository
@@ -16,6 +17,10 @@ from media_factory.persistence.package_repository import SQLAlchemyPackageReposi
 from media_factory.persistence.qa_repository import SQLAlchemyQARepository
 from media_factory.persistence.transcription_repository import (
     SQLAlchemyTranscriptionRepository,
+)
+from media_factory.providers.object_storage import (
+    FilesystemObjectStorageProvider,
+    ObjectStorageProvider,
 )
 from media_factory.providers.speech_recognition import (
     FakeSpeechRecognitionProvider,
@@ -32,6 +37,7 @@ from media_factory.providers.video_understanding import (
     VideoUnderstandingProvider,
 )
 from media_factory.services.analysis_service import AnalysisService
+from media_factory.services.delivery_service import DeliveryService
 from media_factory.services.export_service import LocalExportService
 from media_factory.services.master_processing import (
     FFmpegDecodeValidator,
@@ -81,6 +87,11 @@ def execute_job(job_id: str) -> None:
                 job.package_id,
                 package_build_id,
             )
+        elif job.kind is JobKind.DELIVER_PACKAGE:
+            delivery_id = job.payload.get("delivery_id")
+            if not isinstance(delivery_id, str) or not delivery_id:
+                raise RuntimeError("deliver_package job requires delivery_id")
+            _execute_delivery(settings, database, packages, delivery_id)
         else:
             raise UnsupportedJobKind(job.kind.value)
         jobs.mark_succeeded(job.id)
@@ -296,3 +307,28 @@ def _execute_local_export(
         chunk_size=settings.export_chunk_size,
     )
     service.export(package_id, package_build_id)
+
+
+def _execute_delivery(
+    settings: Settings,
+    database: Database,
+    packages: SQLAlchemyPackageRepository,
+    delivery_id: str,
+) -> None:
+    service = DeliveryService(
+        packages=packages,
+        builds=SQLAlchemyPackageBuildRepository(database.session_factory),
+        reviews=SQLAlchemyQARepository(database.session_factory),
+        deliveries=SQLAlchemyDeliveryRepository(database.session_factory),
+        provider=_build_delivery_provider(settings),
+    )
+    service.deliver(delivery_id)
+
+
+def _build_delivery_provider(settings: Settings) -> ObjectStorageProvider:
+    if settings.delivery_provider == "filesystem":
+        return FilesystemObjectStorageProvider(
+            settings.delivery_filesystem_root,
+            chunk_size=settings.delivery_part_size,
+        )
+    raise RuntimeError(f"Unsupported delivery provider: {settings.delivery_provider}")

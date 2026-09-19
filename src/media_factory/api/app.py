@@ -1,3 +1,4 @@
+import hashlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from functools import lru_cache
@@ -14,6 +15,11 @@ from media_factory.domain.analysis import (
     AnalysisRun,
     EventReviewRequest,
     TimelineEvent,
+)
+from media_factory.domain.delivery import (
+    DeliveryAttempt,
+    DeliveryCreateRequest,
+    UploadedObject,
 )
 from media_factory.domain.errors import (
     EntityNotFoundError,
@@ -48,6 +54,10 @@ from media_factory.domain.transcription import TranscriptionRun
 from media_factory.persistence.analysis_repository import SQLAlchemyAnalysisRepository
 from media_factory.persistence.asset_repository import SQLAlchemyAssetRepository
 from media_factory.persistence.database import Database
+from media_factory.persistence.delivery_repository import (
+    DeliveryStateConflict,
+    SQLAlchemyDeliveryRepository,
+)
 from media_factory.persistence.export_repository import SQLAlchemyExportRepository
 from media_factory.persistence.job_repository import SQLAlchemyJobRepository
 from media_factory.persistence.master_repository import SQLAlchemyMasterRepository
@@ -64,9 +74,11 @@ from media_factory.persistence.qa_repository import (
 from media_factory.persistence.transcription_repository import (
     SQLAlchemyTranscriptionRepository,
 )
+from media_factory.providers.object_storage import FilesystemObjectStorageProvider
 from media_factory.services.analysis_review import AnalysisReviewError, AnalysisReviewService
 from media_factory.services.asset_ingest import AssetIngestService
 from media_factory.services.checksum import UploadTooLarge
+from media_factory.services.delivery_service import DeliveryService, DeliveryWorkflowError
 from media_factory.services.export_service import ExportWorkflowError, LocalExportService
 from media_factory.services.job_queue import RedisJobQueue
 from media_factory.services.job_service import JobDispatchError, JobService
@@ -319,6 +331,33 @@ def get_export_service(
     )
 
 
+def get_delivery_repository(
+    database: Database = Depends(get_database),
+) -> SQLAlchemyDeliveryRepository:
+    return SQLAlchemyDeliveryRepository(database.session_factory)
+
+
+def get_delivery_service(
+    settings: Settings = Depends(get_settings),
+    database: Database = Depends(get_database),
+    builds: SQLAlchemyPackageBuildRepository = Depends(get_package_build_repository),
+    reviews: SQLAlchemyQARepository = Depends(get_qa_repository),
+    deliveries: SQLAlchemyDeliveryRepository = Depends(get_delivery_repository),
+) -> DeliveryService:
+    if settings.delivery_provider != "filesystem":
+        raise RuntimeError(f"Unsupported delivery provider: {settings.delivery_provider}")
+    return DeliveryService(
+        packages=SQLAlchemyPackageRepository(database.session_factory),
+        builds=builds,
+        reviews=reviews,
+        deliveries=deliveries,
+        provider=FilesystemObjectStorageProvider(
+            settings.delivery_filesystem_root,
+            chunk_size=settings.delivery_part_size,
+        ),
+    )
+
+
 @app.get("/api/v1/health/live")
 def live() -> dict[str, str]:
     return {"status": "ok"}
@@ -456,6 +495,7 @@ def create_job(
     transcriptions: TranscriptionService = Depends(get_transcription_service),
     packaging: PackagingService = Depends(get_packaging_service),
     exports: LocalExportService = Depends(get_export_service),
+    deliveries: DeliveryService = Depends(get_delivery_service),
 ) -> Job:
     try:
         if request.kind is JobKind.GENERATE_NARRATION:
@@ -474,6 +514,11 @@ def create_job(
             if not isinstance(package_build_id, str) or not package_build_id:
                 raise ExportWorkflowError("export_package requires package_build_id")
             exports.validate_request(package_id, package_build_id)
+        elif request.kind is JobKind.DELIVER_PACKAGE:
+            delivery_id = request.payload.get("delivery_id")
+            if not isinstance(delivery_id, str) or not delivery_id:
+                raise DeliveryWorkflowError("deliver_package requires delivery_id")
+            deliveries.validate_job(package_id, delivery_id)
         return service.create(
             package_id=package_id,
             kind=request.kind,
@@ -504,6 +549,8 @@ def create_job(
     except PackagingWorkflowError as exc:
         raise _workflow_conflict(exc.code, str(exc)) from exc
     except ExportWorkflowError as exc:
+        raise _workflow_conflict(exc.code, str(exc)) from exc
+    except DeliveryWorkflowError as exc:
         raise _workflow_conflict(exc.code, str(exc)) from exc
 
 
@@ -652,6 +699,75 @@ def create_local_export(
             detail={"code": "job_dispatch_failed", "message": str(exc)},
         ) from exc
     except ExportWorkflowError as exc:
+        raise _workflow_conflict(exc.code, str(exc)) from exc
+
+
+@app.post(
+    "/api/v1/packages/{package_id}/deliver",
+    response_model=Job,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def create_delivery(
+    package_id: str,
+    request: DeliveryCreateRequest,
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=255),
+    deliveries: DeliveryService = Depends(get_delivery_service),
+    jobs: JobService = Depends(get_job_service),
+) -> Job:
+    try:
+        delivery = deliveries.create(
+            package_id,
+            request,
+            idempotency_key=idempotency_key,
+        )
+        return jobs.create(
+            package_id=package_id,
+            kind=JobKind.DELIVER_PACKAGE,
+            idempotency_key=_delivery_job_key(delivery.id, idempotency_key),
+            payload={"delivery_id": delivery.id},
+        )
+    except EntityNotFoundError as exc:
+        raise _not_found(exc) from exc
+    except IdempotencyConflictError as exc:
+        raise _workflow_conflict("idempotency_conflict", str(exc)) from exc
+    except JobDispatchError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "job_dispatch_failed", "message": str(exc)},
+        ) from exc
+    except (DeliveryWorkflowError, DeliveryStateConflict) as exc:
+        raise _workflow_conflict(exc.code, str(exc)) from exc
+
+
+@app.post(
+    "/api/v1/deliveries/{delivery_id}/retry",
+    response_model=Job,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def retry_delivery(
+    delivery_id: str,
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=255),
+    deliveries: DeliveryService = Depends(get_delivery_service),
+    jobs: JobService = Depends(get_job_service),
+) -> Job:
+    try:
+        delivery = deliveries.retry(delivery_id)
+        return jobs.create(
+            package_id=delivery.package_id,
+            kind=JobKind.DELIVER_PACKAGE,
+            idempotency_key=_delivery_job_key(delivery.id, idempotency_key),
+            payload={"delivery_id": delivery.id},
+        )
+    except EntityNotFoundError as exc:
+        raise _not_found(exc) from exc
+    except IdempotencyConflictError as exc:
+        raise _workflow_conflict("idempotency_conflict", str(exc)) from exc
+    except JobDispatchError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "job_dispatch_failed", "message": str(exc)},
+        ) from exc
+    except (DeliveryWorkflowError, DeliveryStateConflict) as exc:
         raise _workflow_conflict(exc.code, str(exc)) from exc
 
 
@@ -970,6 +1086,40 @@ def list_package_builds(
     return repository.list_for_package(package_id)
 
 
+@app.get("/api/v1/deliveries", response_model=list[DeliveryAttempt])
+def list_deliveries(
+    package_id: str | None = None,
+    repository: SQLAlchemyDeliveryRepository = Depends(get_delivery_repository),
+) -> list[DeliveryAttempt]:
+    return repository.list_attempts(package_id)
+
+
+@app.get("/api/v1/deliveries/{delivery_id}", response_model=DeliveryAttempt)
+def get_delivery(
+    delivery_id: str,
+    repository: SQLAlchemyDeliveryRepository = Depends(get_delivery_repository),
+) -> DeliveryAttempt:
+    try:
+        return repository.get(delivery_id)
+    except EntityNotFoundError as exc:
+        raise _not_found(exc) from exc
+
+
+@app.get(
+    "/api/v1/deliveries/{delivery_id}/objects",
+    response_model=list[UploadedObject],
+)
+def list_delivery_objects(
+    delivery_id: str,
+    repository: SQLAlchemyDeliveryRepository = Depends(get_delivery_repository),
+) -> list[UploadedObject]:
+    try:
+        repository.get(delivery_id)
+        return repository.list_objects(delivery_id)
+    except EntityNotFoundError as exc:
+        raise _not_found(exc) from exc
+
+
 @app.get("/api/v1/packages/{package_id}/qa-reviews", response_model=list[QAReview])
 def list_qa_reviews(
     package_id: str,
@@ -1025,6 +1175,11 @@ def _not_found(exc: EntityNotFoundError) -> HTTPException:
             "entity_id": exc.entity_id,
         },
     )
+
+
+def _delivery_job_key(delivery_id: str, request_key: str) -> str:
+    digest = hashlib.sha256(request_key.encode("utf-8")).hexdigest()
+    return f"delivery:{delivery_id}:{digest}"
 
 
 def _version_conflict(exc: VersionConflictError) -> HTTPException:

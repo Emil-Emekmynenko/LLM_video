@@ -481,3 +481,75 @@ class LocalExportRow(Base):
         DateTime(timezone=True), default=utc_now, nullable=False
     )
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class DeliveryAttemptRow(Base):
+    __tablename__ = "delivery_attempts"
+    __table_args__ = (
+        UniqueConstraint(
+            "package_id", "idempotency_key", name="uq_delivery_attempt_idempotency"
+        ),
+        UniqueConstraint("package_build_id", name="uq_delivery_attempt_package_build"),
+        Index("ix_delivery_attempts_package_id", "package_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    package_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("packages.id"), nullable=False
+    )
+    package_build_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("package_builds.id"), nullable=False
+    )
+    provider: Mapped[str] = mapped_column(String(80), nullable=False)
+    destination: Mapped[str] = mapped_column(Text, nullable=False)
+    prefix: Mapped[str] = mapped_column(Text, nullable=False)
+    state: Mapped[str] = mapped_column(String(30), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    delivered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    media_uploaded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    sidecars_uploaded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    package_complete_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    delivery_failed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
+    )
+
+
+class UploadedObjectRow(Base):
+    __tablename__ = "uploaded_objects"
+    __table_args__ = (
+        UniqueConstraint(
+            "delivery_attempt_id", "remote_key", name="uq_uploaded_object_remote_key"
+        ),
+        Index("ix_uploaded_objects_delivery_attempt_id", "delivery_attempt_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    delivery_attempt_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("delivery_attempts.id"), nullable=False
+    )
+    role: Mapped[str] = mapped_column(String(40), nullable=False)
+    local_relative_path: Mapped[str] = mapped_column(Text, nullable=False)
+    remote_key: Mapped[str] = mapped_column(Text, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    provider_checksum: Mapped[str | None] = mapped_column(Text, nullable=True)
+    uploaded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

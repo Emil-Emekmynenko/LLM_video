@@ -17,7 +17,12 @@ def safe_package_base_name(package_id: str) -> str:
 
 def ensure_safe_relative_path(value: str) -> None:
     path = PurePosixPath(value)
-    if path.is_absolute() or ".." in path.parts or value in {"", "."}:
+    if (
+        path.is_absolute()
+        or ".." in path.parts
+        or "\\" in value
+        or value in {"", "."}
+    ):
         raise UnsafePackagePath(f"unsafe relative path: {value}")
 
 
