@@ -207,8 +207,10 @@ function actionFor(item) {
   if (["uploaded", "inspection_failed"].includes(item.state)) return { label: "Запустить инспекцию", run: startInspection };
   if (["ready_for_analysis", "analysis_failed"].includes(item.state)) return { label: "Запустить анализ", run: (value) => startJob(value, "analyze_video") };
   if (item.state === "awaiting_metadata_review") return { label: "Проверить анализ", run: openReview };
+  if (item.state === "awaiting_narration_review") return { label: "Подготовить аудио", run: openNarration };
+  if (["master_building", "master_failed"].includes(item.state)) return { label: "Собрать master", run: (value) => callWorkflow(value, "build-master") };
   if (["master_ready", "transcription_failed", "alignment_failed"].includes(item.state)) return { label: "Создать транскрипт", run: (value) => callWorkflow(value, "transcribe") };
-  if (item.state === "validation_failed") return { label: "Повторить сборку", run: (value) => callWorkflow(value, "build") };
+  if (["packaging", "validation_failed"].includes(item.state)) return { label: item.state === "packaging" ? "Собрать комплект" : "Повторить сборку", run: (value) => callWorkflow(value, "build") };
   return null;
 }
 
@@ -492,6 +494,148 @@ async function approveMetadata(metadata) {
     });
     $("#review-dialog").close(); toast("Метаданные утверждены"); await loadPackages();
   } catch (error) { toast(error.message, true); }
+}
+
+async function openNarration(item) {
+  const dialog = $("#review-dialog");
+  $("#review-title").textContent = appState.assets.get(item.source_asset_id)?.original_name || "Сценарий и аудио";
+  $("#review-body").replaceChildren(node("div", "review-empty", "Загрузка сценария…"));
+  dialog.showModal();
+  await loadNarrationReview(item);
+}
+
+async function loadNarrationReview(item) {
+  try {
+    const [metadataVersions, scripts, tracks, decisions] = await Promise.all([
+      api(`/api/v1/packages/${item.id}/metadata`),
+      api(`/api/v1/packages/${item.id}/narration`),
+      api(`/api/v1/packages/${item.id}/audio-tracks`),
+      api(`/api/v1/packages/${item.id}/audio-decisions`)
+    ]);
+    const metadata = [...metadataVersions].reverse().find((value) => value.status === "approved");
+    if (!metadata) throw new Error("Нет утверждённой версии метаданных");
+    const script = scripts.at(-1);
+    renderNarrationReview(item, metadata, script, tracks, decisions);
+  } catch (error) {
+    $("#review-body").replaceChildren(node("div", "review-empty", error.message));
+  }
+}
+
+function renderNarrationReview(item, metadata, script, tracks, decisions) {
+  $("#review-kicker").textContent = `Аудио · ${metadata.narration_language || "исходная дорожка"}`;
+  const body = $("#review-body"); body.replaceChildren();
+  if (decisions.length) {
+    const latest = decisions.at(-1);
+    body.append(node("div", "review-empty", `Решение по аудио «${latest.policy}» уже зафиксировано. Можно переходить к сборке master.`));
+    return;
+  }
+  const intro = node("div", "review-intro");
+  intro.append(node("p", "", metadata.narration_language
+    ? "Отредактируйте текст, утвердите сценарий и создайте синтетическую дорожку."
+    : "Для этих метаданных озвучка не запрошена. Выберите судьбу исходной аудиодорожки."));
+  body.append(intro);
+
+  if (!metadata.narration_language) {
+    const actions = node("div", "review-actions");
+    actions.append(actionButton("Сохранить исходное аудио", "button-primary", () => decideAudio(item, "preserve")));
+    actions.append(actionButton("Удалить аудио", "button-secondary", () => decideAudio(item, "remove")));
+    body.append(actions);
+    return;
+  }
+
+  if (!script) {
+    const actions = node("div", "review-actions");
+    actions.append(actionButton("Создать сценарий из описания", "button-primary", () => createNarrationProposal(item, metadata)));
+    body.append(actions);
+    return;
+  }
+
+  const form = node("form", "metadata-form");
+  const text = node("textarea"); text.value = script.text; text.required = true; text.maxLength = 20000; text.rows = 9;
+  const language = node("input"); language.value = script.language; language.required = true;
+  const style = node("input"); style.value = script.style; style.required = true;
+  const wpm = node("input"); wpm.type = "number"; wpm.min = "60"; wpm.max = "240"; wpm.value = script.target_wpm;
+  const grid = node("div", "field-grid");
+  grid.append(formField("Язык", language), formField("Темп, слов/мин", wpm));
+  form.append(formField("Текст озвучки", text), formField("Стиль", style), grid);
+  form.append(node("div", "form-note", `Версия ${script.version} · ${script.status === "approved" ? "утверждена" : "черновик"}`));
+  const scriptActions = node("div", "review-actions");
+  if (script.status === "draft") {
+    scriptActions.append(actionButton("Сохранить новую версию", "button-secondary", () => saveNarration(item, script, { text, language, style, wpm })));
+    scriptActions.append(actionButton("Утвердить сценарий", "button-primary", () => approveNarration(item, script)));
+  } else if (!tracks.length) {
+    scriptActions.append(actionButton("Сгенерировать аудио", "button-primary", () => generateNarration(item, script)));
+  }
+  form.append(scriptActions); body.append(form);
+
+  if (tracks.length) {
+    const track = tracks.at(-1);
+    const audio = node("section", "audio-choice");
+    audio.append(node("h3", "", "Готовая дорожка"));
+    audio.append(node("p", "muted", `${track.language} · ${track.duration.toFixed(2)} с · ${formatBytes(track.size_bytes)} · SHA ${track.sha256.slice(0, 12)}…`));
+    const actions = node("div", "review-actions");
+    actions.append(actionButton("Заменить аудио дорожкой TTS", "button-primary", () => decideAudio(item, "replace", track.id)));
+    actions.append(actionButton("Оставить исходное", "button-secondary", () => decideAudio(item, "preserve")));
+    actions.append(actionButton("Удалить аудио", "button-secondary", () => decideAudio(item, "remove")));
+    audio.append(actions); body.append(audio);
+  }
+}
+
+async function createNarrationProposal(item, metadata) {
+  try {
+    await api(`/api/v1/packages/${item.id}/narration/proposals`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ metadata_version_id: metadata.id, style: "neutral, factual", target_wpm: 130 })
+    });
+    toast("Черновик сценария создан"); await loadNarrationReview(item);
+  } catch (error) { toast(error.message, true); }
+}
+
+async function saveNarration(item, script, controls) {
+  try {
+    await api(`/api/v1/narration/${script.id}/revisions`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        base_version: script.version, text: controls.text.value.trim(), language: controls.language.value.trim(),
+        style: controls.style.value.trim(), target_wpm: Number(controls.wpm.value), created_by: "operator",
+        change_note: "Edited in operator console"
+      })
+    });
+    toast("Новая версия сценария сохранена"); await loadNarrationReview(item);
+  } catch (error) { toast(error.message, true); }
+}
+
+async function approveNarration(item, script) {
+  try {
+    await api(`/api/v1/narration/${script.id}/approve`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expected_version: script.version })
+    });
+    toast("Сценарий утверждён"); await loadNarrationReview(item);
+  } catch (error) { toast(error.message, true); }
+}
+
+async function generateNarration(item, script) {
+  try {
+    await api(`/api/v1/packages/${item.id}/jobs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": `generate-narration-${item.id}-${crypto.randomUUID()}` },
+      body: JSON.stringify({ kind: "generate_narration", payload: { script_id: script.id } })
+    });
+    $("#review-dialog").close(); toast("Озвучка поставлена в очередь"); await loadPackages();
+  } catch (error) { toast(error.message, true); }
+}
+
+async function decideAudio(item, policy, audioTrackId = null) {
+  try {
+    await api(`/api/v1/packages/${item.id}/audio-decisions`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ policy, audio_track_id: audioTrackId, created_by: "operator" })
+    });
+    await api(`/api/v1/packages/${item.id}/build-master`, {
+      method: "POST", headers: { "Idempotency-Key": `build-master-${item.id}-${crypto.randomUUID()}` }
+    });
+    $("#review-dialog").close(); toast("Решение по аудио сохранено, master поставлен в сборку"); await loadPackages();
+  } catch (error) { toast(error.message, true); await loadPackages(); }
 }
 
 async function uploadFile(file) {
