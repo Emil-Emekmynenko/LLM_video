@@ -17,6 +17,7 @@ from media_factory.persistence.tables import (  # noqa: F401
     MetadataCategoryRow,
     MetadataVersionRow,
     NarrationScriptRow,
+    PackageBuildRow,
     PackageRow,
     TranscriptionRunRow,
     TTSRunRow,

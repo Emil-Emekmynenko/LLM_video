@@ -387,3 +387,48 @@ class TranscriptionRunRow(Base):
         DateTime(timezone=True), default=utc_now, nullable=False
     )
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PackageBuildRow(Base):
+    __tablename__ = "package_builds"
+    __table_args__ = (
+        UniqueConstraint("package_id", "version", name="uq_package_build_version"),
+        Index("ix_package_builds_package_id", "package_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    package_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("packages.id"), nullable=False
+    )
+    version: Mapped[int] = mapped_column(nullable=False)
+    state: Mapped[str] = mapped_column(String(20), nullable=False)
+    master_build_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("master_builds.id"), nullable=False
+    )
+    transcription_run_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("transcription_runs.id"), nullable=False
+    )
+    metadata_version_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("metadata_versions.id"), nullable=False
+    )
+    delivery_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    customer: Mapped[str] = mapped_column(String(200), nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(80), nullable=False)
+    base_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    output_dir: Mapped[str | None] = mapped_column(Text, nullable=True)
+    files: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
+    manifest_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    manifest_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    computed_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    validation_issues: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    build_parameters: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

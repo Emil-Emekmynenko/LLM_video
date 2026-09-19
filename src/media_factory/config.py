@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     faster_whisper_language: str | None = None
     faster_whisper_beam_size: int = Field(default=5, ge=1)
     faster_whisper_vad_filter: bool = True
+    package_dir: Path = Path("data/packages")
+    default_customer: str = "internal"
+    default_customer_schema_version: str = "1.0"
 
 
 @lru_cache(maxsize=1)

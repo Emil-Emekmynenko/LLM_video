@@ -167,6 +167,20 @@ class SQLAlchemyMetadataRepository:
         with self.session_factory() as session:
             return [self._to_domain(row) for row in session.scalars(statement)]
 
+    def get_latest_approved(self, package_id: str) -> MetadataVersion:
+        statement: Select[tuple[MetadataVersionRow]] = (
+            select(MetadataVersionRow)
+            .where(MetadataVersionRow.package_id == package_id)
+            .where(MetadataVersionRow.status == MetadataStatus.APPROVED.value)
+            .order_by(MetadataVersionRow.version.desc())
+            .limit(1)
+        )
+        with self.session_factory() as session:
+            row = session.scalar(statement)
+            if row is None:
+                raise EntityNotFoundError("approved_metadata", package_id)
+            return self._to_domain(row)
+
     @staticmethod
     def _require_category(session: Session, category: str) -> None:
         row = session.get(MetadataCategoryRow, category)

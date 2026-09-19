@@ -104,6 +104,20 @@ class SQLAlchemyTranscriptionRepository:
         with self.session_factory() as session:
             return [self._to_domain(row) for row in session.scalars(statement)]
 
+    def get_latest_succeeded(self, package_id: str) -> TranscriptionRun:
+        statement: Select[tuple[TranscriptionRunRow]] = (
+            select(TranscriptionRunRow)
+            .where(TranscriptionRunRow.package_id == package_id)
+            .where(TranscriptionRunRow.state == TranscriptionRunState.SUCCEEDED.value)
+            .order_by(TranscriptionRunRow.created_at.desc())
+            .limit(1)
+        )
+        with self.session_factory() as session:
+            row = session.scalar(statement)
+            if row is None:
+                raise EntityNotFoundError("successful_transcription", package_id)
+            return self._to_domain(row)
+
     def _update(self, run_id: str, **values: Any) -> TranscriptionRun:
         with self.session_factory.begin() as session:
             result = cast(

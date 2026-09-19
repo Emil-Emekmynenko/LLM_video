@@ -8,6 +8,9 @@ from media_factory.persistence.job_repository import SQLAlchemyJobRepository
 from media_factory.persistence.master_repository import SQLAlchemyMasterRepository
 from media_factory.persistence.metadata_repository import SQLAlchemyMetadataRepository
 from media_factory.persistence.narration_repository import SQLAlchemyNarrationRepository
+from media_factory.persistence.package_build_repository import (
+    SQLAlchemyPackageBuildRepository,
+)
 from media_factory.persistence.package_repository import SQLAlchemyPackageRepository
 from media_factory.persistence.transcription_repository import (
     SQLAlchemyTranscriptionRepository,
@@ -34,6 +37,7 @@ from media_factory.services.master_processing import (
 from media_factory.services.master_service import MasterService
 from media_factory.services.media_inspector import FFprobeMediaInspector, MediaInspectionError
 from media_factory.services.narration_service import NarrationService
+from media_factory.services.packaging_service import PackagingService
 from media_factory.services.scene_detection import PySceneDetector
 from media_factory.services.transcription_service import TranscriptionService
 from media_factory.services.video_processing import FFmpegClipExtractor, FFmpegProxyGenerator
@@ -61,6 +65,8 @@ def execute_job(job_id: str) -> None:
             _execute_master_build(settings, database, packages, assets, job.package_id)
         elif job.kind is JobKind.TRANSCRIBE_MASTER:
             _execute_transcription(settings, database, packages, job.package_id)
+        elif job.kind is JobKind.BUILD_PACKAGE:
+            _execute_package_build(settings, database, packages, assets, job.package_id)
         else:
             raise UnsupportedJobKind(job.kind.value)
         jobs.mark_succeeded(job.id)
@@ -68,7 +74,11 @@ def execute_job(job_id: str) -> None:
         jobs.mark_failed(job.id, code=exc.code, message=str(exc))
         raise
     except Exception as exc:
-        jobs.mark_failed(job.id, code="job_failed", message=str(exc))
+        jobs.mark_failed(
+            job.id,
+            code=str(getattr(exc, "code", "job_failed")),
+            message=str(exc),
+        )
         raise
 
 
@@ -229,3 +239,28 @@ def _build_asr_provider(settings: Settings) -> SpeechRecognitionProvider:
             vad_filter=settings.faster_whisper_vad_filter,
         )
     raise RuntimeError(f"Unsupported ASR provider: {settings.asr_provider}")
+
+
+def _execute_package_build(
+    settings: Settings,
+    database: Database,
+    packages: SQLAlchemyPackageRepository,
+    assets: SQLAlchemyAssetRepository,
+    package_id: str,
+) -> None:
+    service = PackagingService(
+        packages=packages,
+        assets=assets,
+        analyses=SQLAlchemyAnalysisRepository(database.session_factory),
+        metadata=SQLAlchemyMetadataRepository(database.session_factory),
+        narration=SQLAlchemyNarrationRepository(database.session_factory),
+        masters=SQLAlchemyMasterRepository(database.session_factory),
+        transcriptions=SQLAlchemyTranscriptionRepository(database.session_factory),
+        builds=SQLAlchemyPackageBuildRepository(database.session_factory),
+        decoder=FFmpegDecodeValidator(ffmpeg_bin=settings.ffmpeg_bin),
+        package_dir=settings.package_dir,
+        customer=settings.default_customer,
+        schema_version=settings.default_customer_schema_version,
+        duration_tolerance=settings.transcript_duration_tolerance,
+    )
+    service.build(package_id)

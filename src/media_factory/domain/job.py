@@ -11,6 +11,7 @@ class JobKind(StrEnum):
     GENERATE_NARRATION = "generate_narration"
     BUILD_MASTER = "build_master"
     TRANSCRIBE_MASTER = "transcribe_master"
+    BUILD_PACKAGE = "build_package"
 
 
 class JobState(StrEnum):

@@ -36,6 +36,8 @@ class PackageService:
             PackageState.ALIGNING,
             PackageState.ALIGNMENT_FAILED,
             PackageState.PACKAGING,
+            PackageState.VALIDATION_FAILED,
+            PackageState.AWAITING_QA,
         }:
             raise GuardedPackageTransition(target)
         current = self.repository.get(package_id)

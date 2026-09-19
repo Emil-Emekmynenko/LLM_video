@@ -23,6 +23,7 @@ outputs/
 exports/
 proxies/
 masters/
+packages/
 models/
 logs/
 *.mp4

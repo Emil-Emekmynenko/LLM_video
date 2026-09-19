@@ -40,6 +40,7 @@ from media_factory.domain.narration import (
 )
 from media_factory.domain.package import Package, PackageCreate, PackageTransitionRequest
 from media_factory.domain.package_state import InvalidPackageTransition
+from media_factory.domain.packaging import PackageBuild
 from media_factory.domain.transcription import TranscriptionRun
 from media_factory.persistence.analysis_repository import SQLAlchemyAnalysisRepository
 from media_factory.persistence.asset_repository import SQLAlchemyAssetRepository
@@ -48,6 +49,9 @@ from media_factory.persistence.job_repository import SQLAlchemyJobRepository
 from media_factory.persistence.master_repository import SQLAlchemyMasterRepository
 from media_factory.persistence.metadata_repository import SQLAlchemyMetadataRepository
 from media_factory.persistence.narration_repository import SQLAlchemyNarrationRepository
+from media_factory.persistence.package_build_repository import (
+    SQLAlchemyPackageBuildRepository,
+)
 from media_factory.persistence.package_repository import SQLAlchemyPackageRepository
 from media_factory.persistence.transcription_repository import (
     SQLAlchemyTranscriptionRepository,
@@ -66,6 +70,10 @@ from media_factory.services.media_inspector import FFprobeMediaInspector, MediaI
 from media_factory.services.metadata_service import MetadataService, MetadataWorkflowError
 from media_factory.services.narration_service import NarrationService, NarrationWorkflowError
 from media_factory.services.package_service import GuardedPackageTransition, PackageService
+from media_factory.services.packaging_service import (
+    PackagingService,
+    PackagingWorkflowError,
+)
 from media_factory.services.transcript_validator import validate_transcript
 from media_factory.services.transcription_service import (
     TranscriptionService,
@@ -232,6 +240,34 @@ def get_transcription_service(
     )
 
 
+def get_package_build_repository(
+    database: Database = Depends(get_database),
+) -> SQLAlchemyPackageBuildRepository:
+    return SQLAlchemyPackageBuildRepository(database.session_factory)
+
+
+def get_packaging_service(
+    settings: Settings = Depends(get_settings),
+    database: Database = Depends(get_database),
+    builds: SQLAlchemyPackageBuildRepository = Depends(get_package_build_repository),
+) -> PackagingService:
+    return PackagingService(
+        packages=SQLAlchemyPackageRepository(database.session_factory),
+        assets=SQLAlchemyAssetRepository(database.session_factory),
+        analyses=SQLAlchemyAnalysisRepository(database.session_factory),
+        metadata=SQLAlchemyMetadataRepository(database.session_factory),
+        narration=SQLAlchemyNarrationRepository(database.session_factory),
+        masters=SQLAlchemyMasterRepository(database.session_factory),
+        transcriptions=SQLAlchemyTranscriptionRepository(database.session_factory),
+        builds=builds,
+        decoder=FFmpegDecodeValidator(ffmpeg_bin=settings.ffmpeg_bin),
+        package_dir=settings.package_dir,
+        customer=settings.default_customer,
+        schema_version=settings.default_customer_schema_version,
+        duration_tolerance=settings.transcript_duration_tolerance,
+    )
+
+
 @app.get("/api/v1/health/live")
 def live() -> dict[str, str]:
     return {"status": "ok"}
@@ -367,6 +403,7 @@ def create_job(
     narration: NarrationService = Depends(get_narration_service),
     masters: MasterService = Depends(get_master_service),
     transcriptions: TranscriptionService = Depends(get_transcription_service),
+    packaging: PackagingService = Depends(get_packaging_service),
 ) -> Job:
     try:
         if request.kind is JobKind.GENERATE_NARRATION:
@@ -378,6 +415,8 @@ def create_job(
             masters.validate_build_request(package_id)
         elif request.kind is JobKind.TRANSCRIBE_MASTER:
             transcriptions.validate_request(package_id)
+        elif request.kind is JobKind.BUILD_PACKAGE:
+            packaging.validate_request(package_id)
         return service.create(
             package_id=package_id,
             kind=request.kind,
@@ -404,6 +443,8 @@ def create_job(
     except MasterWorkflowError as exc:
         raise _workflow_conflict(exc.code, str(exc)) from exc
     except TranscriptionWorkflowError as exc:
+        raise _workflow_conflict(exc.code, str(exc)) from exc
+    except PackagingWorkflowError as exc:
         raise _workflow_conflict(exc.code, str(exc)) from exc
 
 
@@ -468,6 +509,38 @@ def transcribe_master(
             detail={"code": "job_dispatch_failed", "message": str(exc)},
         ) from exc
     except TranscriptionWorkflowError as exc:
+        raise _workflow_conflict(exc.code, str(exc)) from exc
+
+
+@app.post(
+    "/api/v1/packages/{package_id}/build",
+    response_model=Job,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def build_package(
+    package_id: str,
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=255),
+    jobs: JobService = Depends(get_job_service),
+    packaging: PackagingService = Depends(get_packaging_service),
+) -> Job:
+    try:
+        packaging.validate_request(package_id)
+        return jobs.create(
+            package_id=package_id,
+            kind=JobKind.BUILD_PACKAGE,
+            idempotency_key=idempotency_key,
+            payload={},
+        )
+    except EntityNotFoundError as exc:
+        raise _not_found(exc) from exc
+    except IdempotencyConflictError as exc:
+        raise _workflow_conflict("idempotency_conflict", str(exc)) from exc
+    except JobDispatchError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "job_dispatch_failed", "message": str(exc)},
+        ) from exc
+    except PackagingWorkflowError as exc:
         raise _workflow_conflict(exc.code, str(exc)) from exc
 
 
@@ -770,6 +843,19 @@ def list_transcription_runs(
         get_transcription_repository
     ),
 ) -> list[TranscriptionRun]:
+    return repository.list_for_package(package_id)
+
+
+@app.get(
+    "/api/v1/packages/{package_id}/builds",
+    response_model=list[PackageBuild],
+)
+def list_package_builds(
+    package_id: str,
+    repository: SQLAlchemyPackageBuildRepository = Depends(
+        get_package_build_repository
+    ),
+) -> list[PackageBuild]:
     return repository.list_for_package(package_id)
 
 
