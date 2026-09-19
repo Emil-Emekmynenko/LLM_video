@@ -5,7 +5,13 @@ from media_factory.persistence.analysis_repository import SQLAlchemyAnalysisRepo
 from media_factory.persistence.asset_repository import SQLAlchemyAssetRepository
 from media_factory.persistence.database import Database
 from media_factory.persistence.job_repository import SQLAlchemyJobRepository
+from media_factory.persistence.metadata_repository import SQLAlchemyMetadataRepository
+from media_factory.persistence.narration_repository import SQLAlchemyNarrationRepository
 from media_factory.persistence.package_repository import SQLAlchemyPackageRepository
+from media_factory.providers.text_to_speech import (
+    FakeTextToSpeechProvider,
+    TextToSpeechProvider,
+)
 from media_factory.providers.video_understanding import (
     FakeVideoUnderstandingProvider,
     QwenOpenAICompatibleProvider,
@@ -13,6 +19,7 @@ from media_factory.providers.video_understanding import (
 )
 from media_factory.services.analysis_service import AnalysisService
 from media_factory.services.media_inspector import FFprobeMediaInspector, MediaInspectionError
+from media_factory.services.narration_service import NarrationService
 from media_factory.services.scene_detection import PySceneDetector
 from media_factory.services.video_processing import FFmpegClipExtractor, FFmpegProxyGenerator
 
@@ -30,6 +37,11 @@ def execute_job(job_id: str) -> None:
             _execute_inspection(settings.ffprobe_bin, packages, assets, job.package_id)
         elif job.kind is JobKind.ANALYZE_VIDEO:
             _execute_analysis(settings, database, packages, assets, job.package_id)
+        elif job.kind is JobKind.GENERATE_NARRATION:
+            script_id = job.payload.get("script_id")
+            if not isinstance(script_id, str) or not script_id:
+                raise RuntimeError("generate_narration job requires script_id")
+            _execute_narration(settings, database, packages, job.package_id, script_id)
         else:
             raise UnsupportedJobKind(job.kind.value)
         jobs.mark_succeeded(job.id)
@@ -114,3 +126,30 @@ def _build_vlm_provider(settings: Settings) -> VideoUnderstandingProvider:
             max_tokens=settings.qwen_max_tokens,
         )
     raise RuntimeError(f"Unsupported VLM provider: {settings.vlm_provider}")
+
+
+def _execute_narration(
+    settings: Settings,
+    database: Database,
+    packages: SQLAlchemyPackageRepository,
+    package_id: str,
+    script_id: str,
+) -> None:
+    service = NarrationService(
+        packages=packages,
+        metadata=SQLAlchemyMetadataRepository(database.session_factory),
+        narration=SQLAlchemyNarrationRepository(database.session_factory),
+        narration_dir=settings.narration_dir,
+        allow_additional_audio=settings.allow_additional_audio,
+    )
+    service.generate_audio(package_id, script_id, _build_tts_provider(settings))
+
+
+def _build_tts_provider(settings: Settings) -> TextToSpeechProvider:
+    if settings.tts_provider == "fake":
+        if not settings.allow_fake_tts:
+            raise RuntimeError("Fake TTS provider is disabled")
+        if settings.environment != "development":
+            raise RuntimeError("Fake TTS provider is forbidden outside development")
+        return FakeTextToSpeechProvider()
+    raise RuntimeError(f"Unsupported TTS provider: {settings.tts_provider}")

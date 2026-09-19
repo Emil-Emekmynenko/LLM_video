@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 class JobKind(StrEnum):
     INSPECT_ASSET = "inspect_asset"
     ANALYZE_VIDEO = "analyze_video"
+    GENERATE_NARRATION = "generate_narration"
 
 
 class JobState(StrEnum):

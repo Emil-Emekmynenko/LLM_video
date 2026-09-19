@@ -224,3 +224,102 @@ class MetadataVersionRow(Base):
         DateTime(timezone=True), default=utc_now, nullable=False
     )
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class NarrationScriptRow(Base):
+    __tablename__ = "narration_scripts"
+    __table_args__ = (
+        UniqueConstraint("package_id", "version", name="uq_narration_package_version"),
+        Index("ix_narration_scripts_package_id", "package_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    package_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("packages.id"), nullable=False
+    )
+    metadata_version_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("metadata_versions.id"), nullable=False
+    )
+    version: Mapped[int] = mapped_column(nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    language: Mapped[str] = mapped_column(String(35), nullable=False)
+    style: Mapped[str] = mapped_column(String(200), nullable=False)
+    target_wpm: Mapped[int] = mapped_column(nullable=False)
+    created_by: Mapped[str] = mapped_column(String(200), nullable=False)
+    change_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class TTSRunRow(Base):
+    __tablename__ = "tts_runs"
+    __table_args__ = (Index("ix_tts_runs_package_id", "package_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    package_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("packages.id"), nullable=False
+    )
+    script_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("narration_scripts.id"), nullable=False
+    )
+    state: Mapped[str] = mapped_column(String(20), nullable=False)
+    provider_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    provider_version: Mapped[str] = mapped_column(String(80), nullable=False)
+    parameters: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AudioTrackRow(Base):
+    __tablename__ = "audio_tracks"
+    __table_args__ = (Index("ix_audio_tracks_package_id", "package_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    package_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("packages.id"), nullable=False
+    )
+    tts_run_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("tts_runs.id"), nullable=False
+    )
+    script_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("narration_scripts.id"), nullable=False
+    )
+    path: Mapped[str] = mapped_column(Text, nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    duration: Mapped[float] = mapped_column(nullable=False)
+    language: Mapped[str] = mapped_column(String(35), nullable=False)
+    synthetic: Mapped[bool] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+
+
+class AudioDecisionRow(Base):
+    __tablename__ = "audio_decisions"
+    __table_args__ = (
+        UniqueConstraint("package_id", "version", name="uq_audio_decision_version"),
+        Index("ix_audio_decisions_package_id", "package_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    package_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("packages.id"), nullable=False
+    )
+    version: Mapped[int] = mapped_column(nullable=False)
+    policy: Mapped[str] = mapped_column(String(20), nullable=False)
+    audio_track_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("audio_tracks.id"), nullable=True
+    )
+    created_by: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )

@@ -85,14 +85,9 @@ class MetadataService:
         if package.state is not PackageState.AWAITING_METADATA_REVIEW:
             raise MetadataWorkflowError("package is not awaiting metadata review")
         approved = self.metadata.approve(metadata_id, expected_version=expected_version)
-        target = (
-            PackageState.AWAITING_NARRATION_REVIEW
-            if approved.narration_language is not None
-            else PackageState.MASTER_BUILDING
-        )
         self.packages.transition(
             package.id,
-            target=target,
+            target=PackageState.AWAITING_NARRATION_REVIEW,
             expected_version=package.version,
         )
         return approved

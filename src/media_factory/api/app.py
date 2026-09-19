@@ -18,7 +18,7 @@ from media_factory.domain.errors import (
     IdempotencyConflictError,
     VersionConflictError,
 )
-from media_factory.domain.job import Job, JobCreate
+from media_factory.domain.job import Job, JobCreate, JobKind
 from media_factory.domain.metadata import (
     MetadataApprovalRequest,
     MetadataCategory,
@@ -27,6 +27,16 @@ from media_factory.domain.metadata import (
     MetadataVersion,
 )
 from media_factory.domain.models import StoredAsset, Transcript, ValidationIssue
+from media_factory.domain.narration import (
+    AudioDecision,
+    AudioDecisionRequest,
+    AudioTrack,
+    NarrationApprovalRequest,
+    NarrationProposalRequest,
+    NarrationRevisionRequest,
+    NarrationScript,
+    TTSRun,
+)
 from media_factory.domain.package import Package, PackageCreate, PackageTransitionRequest
 from media_factory.domain.package_state import InvalidPackageTransition
 from media_factory.persistence.analysis_repository import SQLAlchemyAnalysisRepository
@@ -34,6 +44,7 @@ from media_factory.persistence.asset_repository import SQLAlchemyAssetRepository
 from media_factory.persistence.database import Database
 from media_factory.persistence.job_repository import SQLAlchemyJobRepository
 from media_factory.persistence.metadata_repository import SQLAlchemyMetadataRepository
+from media_factory.persistence.narration_repository import SQLAlchemyNarrationRepository
 from media_factory.persistence.package_repository import SQLAlchemyPackageRepository
 from media_factory.services.analysis_review import AnalysisReviewError, AnalysisReviewService
 from media_factory.services.asset_ingest import AssetIngestService
@@ -42,7 +53,8 @@ from media_factory.services.job_queue import RedisJobQueue
 from media_factory.services.job_service import JobDispatchError, JobService
 from media_factory.services.media_inspector import FFprobeMediaInspector, MediaInspectionError
 from media_factory.services.metadata_service import MetadataService, MetadataWorkflowError
-from media_factory.services.package_service import PackageService
+from media_factory.services.narration_service import NarrationService, NarrationWorkflowError
+from media_factory.services.package_service import GuardedPackageTransition, PackageService
 from media_factory.services.transcript_validator import validate_transcript
 
 
@@ -132,6 +144,27 @@ def get_metadata_service(
         packages=SQLAlchemyPackageRepository(database.session_factory),
         analyses=analyses,
         metadata=metadata,
+    )
+
+
+def get_narration_repository(
+    database: Database = Depends(get_database),
+) -> SQLAlchemyNarrationRepository:
+    return SQLAlchemyNarrationRepository(database.session_factory)
+
+
+def get_narration_service(
+    settings: Settings = Depends(get_settings),
+    database: Database = Depends(get_database),
+    metadata: SQLAlchemyMetadataRepository = Depends(get_metadata_repository),
+    narration: SQLAlchemyNarrationRepository = Depends(get_narration_repository),
+) -> NarrationService:
+    return NarrationService(
+        packages=SQLAlchemyPackageRepository(database.session_factory),
+        metadata=metadata,
+        narration=narration,
+        narration_dir=settings.narration_dir,
+        allow_additional_audio=settings.allow_additional_audio,
     )
 
 
@@ -247,6 +280,14 @@ def transition_package(
                 "target": exc.target.value,
             },
         ) from exc
+    except GuardedPackageTransition as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "system_managed_transition",
+                "target": exc.target.value,
+            },
+        ) from exc
 
 
 @app.post(
@@ -259,8 +300,14 @@ def create_job(
     request: JobCreate,
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=255),
     service: JobService = Depends(get_job_service),
+    narration: NarrationService = Depends(get_narration_service),
 ) -> Job:
     try:
+        if request.kind is JobKind.GENERATE_NARRATION:
+            script_id = request.payload.get("script_id")
+            if not isinstance(script_id, str) or not script_id:
+                raise NarrationWorkflowError("generate_narration requires script_id")
+            narration.validate_tts_request(package_id, script_id)
         return service.create(
             package_id=package_id,
             kind=request.kind,
@@ -282,6 +329,8 @@ def create_job(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"code": "job_dispatch_failed", "message": str(exc)},
         ) from exc
+    except NarrationWorkflowError as exc:
+        raise _workflow_conflict(exc.code, str(exc)) from exc
 
 
 @app.get("/api/v1/jobs/{job_id}", response_model=Job)
@@ -437,6 +486,129 @@ def approve_metadata(
         raise _version_conflict(exc) from exc
     except MetadataWorkflowError as exc:
         raise _workflow_conflict(exc.code, str(exc)) from exc
+
+
+@app.post(
+    "/api/v1/packages/{package_id}/narration/proposals",
+    response_model=NarrationScript,
+    status_code=status.HTTP_201_CREATED,
+)
+def propose_narration(
+    package_id: str,
+    request: NarrationProposalRequest,
+    service: NarrationService = Depends(get_narration_service),
+) -> NarrationScript:
+    try:
+        return service.propose_script(package_id, request)
+    except EntityNotFoundError as exc:
+        raise _not_found(exc) from exc
+    except NarrationWorkflowError as exc:
+        raise _workflow_conflict(exc.code, str(exc)) from exc
+
+
+@app.get(
+    "/api/v1/packages/{package_id}/narration",
+    response_model=list[NarrationScript],
+)
+def list_narration_scripts(
+    package_id: str,
+    database: Database = Depends(get_database),
+    repository: SQLAlchemyNarrationRepository = Depends(get_narration_repository),
+) -> list[NarrationScript]:
+    try:
+        SQLAlchemyPackageRepository(database.session_factory).get(package_id)
+        return repository.list_scripts(package_id)
+    except EntityNotFoundError as exc:
+        raise _not_found(exc) from exc
+
+
+@app.post(
+    "/api/v1/narration/{script_id}/revisions",
+    response_model=NarrationScript,
+    status_code=status.HTTP_201_CREATED,
+)
+def revise_narration(
+    script_id: str,
+    request: NarrationRevisionRequest,
+    service: NarrationService = Depends(get_narration_service),
+) -> NarrationScript:
+    try:
+        return service.revise_script(script_id, request)
+    except EntityNotFoundError as exc:
+        raise _not_found(exc) from exc
+    except VersionConflictError as exc:
+        raise _version_conflict(exc) from exc
+    except NarrationWorkflowError as exc:
+        raise _workflow_conflict(exc.code, str(exc)) from exc
+
+
+@app.post("/api/v1/narration/{script_id}/approve", response_model=NarrationScript)
+def approve_narration(
+    script_id: str,
+    request: NarrationApprovalRequest,
+    service: NarrationService = Depends(get_narration_service),
+) -> NarrationScript:
+    try:
+        return service.approve_script(script_id, expected_version=request.expected_version)
+    except EntityNotFoundError as exc:
+        raise _not_found(exc) from exc
+    except VersionConflictError as exc:
+        raise _version_conflict(exc) from exc
+    except NarrationWorkflowError as exc:
+        raise _workflow_conflict(exc.code, str(exc)) from exc
+
+
+@app.get(
+    "/api/v1/packages/{package_id}/audio-tracks",
+    response_model=list[AudioTrack],
+)
+def list_audio_tracks(
+    package_id: str,
+    repository: SQLAlchemyNarrationRepository = Depends(get_narration_repository),
+) -> list[AudioTrack]:
+    return repository.list_audio_tracks(package_id)
+
+
+@app.get(
+    "/api/v1/packages/{package_id}/tts-runs",
+    response_model=list[TTSRun],
+)
+def list_tts_runs(
+    package_id: str,
+    repository: SQLAlchemyNarrationRepository = Depends(get_narration_repository),
+) -> list[TTSRun]:
+    return repository.list_tts_runs(package_id)
+
+
+@app.post(
+    "/api/v1/packages/{package_id}/audio-decisions",
+    response_model=AudioDecision,
+    status_code=status.HTTP_201_CREATED,
+)
+def decide_audio(
+    package_id: str,
+    request: AudioDecisionRequest,
+    service: NarrationService = Depends(get_narration_service),
+) -> AudioDecision:
+    try:
+        return service.decide_audio(package_id, request)
+    except EntityNotFoundError as exc:
+        raise _not_found(exc) from exc
+    except VersionConflictError as exc:
+        raise _version_conflict(exc) from exc
+    except NarrationWorkflowError as exc:
+        raise _workflow_conflict(exc.code, str(exc)) from exc
+
+
+@app.get(
+    "/api/v1/packages/{package_id}/audio-decisions",
+    response_model=list[AudioDecision],
+)
+def list_audio_decisions(
+    package_id: str,
+    repository: SQLAlchemyNarrationRepository = Depends(get_narration_repository),
+) -> list[AudioDecision]:
+    return repository.list_audio_decisions(package_id)
 
 
 def _not_found(exc: EntityNotFoundError) -> HTTPException:

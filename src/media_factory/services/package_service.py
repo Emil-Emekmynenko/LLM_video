@@ -3,6 +3,12 @@ from media_factory.domain.package_state import PackageState, ensure_transition_a
 from media_factory.persistence.package_repository import SQLAlchemyPackageRepository
 
 
+class GuardedPackageTransition(RuntimeError):
+    def __init__(self, target: PackageState) -> None:
+        super().__init__(f"Package state {target.value} is managed by its workflow service")
+        self.target = target
+
+
 class PackageService:
     def __init__(self, repository: SQLAlchemyPackageRepository) -> None:
         self.repository = repository
@@ -20,6 +26,8 @@ class PackageService:
         target: PackageState,
         expected_version: int,
     ) -> Package:
+        if target in {PackageState.GENERATING_NARRATION, PackageState.MASTER_BUILDING}:
+            raise GuardedPackageTransition(target)
         current = self.repository.get(package_id)
         if current.version != expected_version:
             from media_factory.domain.errors import VersionConflictError
@@ -31,4 +39,3 @@ class PackageService:
             target=target,
             expected_version=expected_version,
         )
-

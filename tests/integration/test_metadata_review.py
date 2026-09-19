@@ -138,4 +138,4 @@ def test_review_metadata_revision_and_approval_workflow(tmp_path: Path) -> None:
         MetadataStatus.APPROVED,
     ]
     assert approved.version == 2
-    assert packages.get(package.id).state is PackageState.MASTER_BUILDING
+    assert packages.get(package.id).state is PackageState.AWAITING_NARRATION_REVIEW

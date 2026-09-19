@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     qwen_max_retries: int = Field(default=2, ge=0, le=5)
     qwen_temperature: float = Field(default=0.1, ge=0, le=2)
     qwen_max_tokens: int = Field(default=2048, gt=0)
+    narration_dir: Path = Path("data/narration")
+    tts_provider: str = "fake"
+    allow_fake_tts: bool = True
+    allow_additional_audio: bool = False
 
 
 @lru_cache(maxsize=1)

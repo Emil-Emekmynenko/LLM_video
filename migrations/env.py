@@ -10,10 +10,14 @@ from media_factory.persistence.tables import (  # noqa: F401
     AnalysisEventRow,
     AnalysisRunRow,
     AssetRow,
+    AudioDecisionRow,
+    AudioTrackRow,
     JobRow,
     MetadataCategoryRow,
     MetadataVersionRow,
+    NarrationScriptRow,
     PackageRow,
+    TTSRunRow,
 )
 
 config = context.config
