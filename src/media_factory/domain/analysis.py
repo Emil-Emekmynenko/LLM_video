@@ -10,6 +10,12 @@ class AnalysisRunState(StrEnum):
     FAILED = "failed"
 
 
+class AnalysisReviewStatus(StrEnum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
 class ReviewStatus(StrEnum):
     PENDING = "pending"
     NEEDS_REVIEW = "needs_review"
@@ -87,7 +93,9 @@ class TimelineEvent(BaseModel):
     source_clip_ids: list[str] = Field(default_factory=list)
     conflict_event_ids: list[str] = Field(default_factory=list)
     review_status: ReviewStatus = ReviewStatus.PENDING
+    version: int = Field(default=1, ge=1)
     created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     @model_validator(mode="after")
     def validate_order(self) -> "TimelineEvent":
@@ -101,6 +109,7 @@ class AnalysisRun(BaseModel):
     package_id: str
     source_sha256: str
     state: AnalysisRunState
+    review_status: AnalysisReviewStatus = AnalysisReviewStatus.PENDING
     provider_name: str
     provider_version: str
     prompt_version: str
@@ -112,3 +121,19 @@ class AnalysisRun(BaseModel):
     error_message: str | None = None
     created_at: datetime
     finished_at: datetime | None = None
+    reviewed_at: datetime | None = None
+
+
+class EventReviewRequest(BaseModel):
+    review_status: ReviewStatus
+    expected_version: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def validate_final_status(self) -> "EventReviewRequest":
+        if self.review_status not in {ReviewStatus.APPROVED, ReviewStatus.REJECTED}:
+            raise ValueError("event review must approve or reject the event")
+        return self
+
+
+class AnalysisReviewRequest(BaseModel):
+    approved: bool

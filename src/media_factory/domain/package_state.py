@@ -11,6 +11,10 @@ class PackageState(StrEnum):
     ANALYZING = "analyzing"
     ANALYSIS_FAILED = "analysis_failed"
     AWAITING_METADATA_REVIEW = "awaiting_metadata_review"
+    AWAITING_NARRATION_REVIEW = "awaiting_narration_review"
+    GENERATING_NARRATION = "generating_narration"
+    MASTER_BUILDING = "master_building"
+    MASTER_FAILED = "master_failed"
     MASTER_READY = "master_ready"
     TRANSCRIBING = "transcribing"
     TRANSCRIPTION_FAILED = "transcription_failed"
@@ -55,7 +59,24 @@ ALLOWED_TRANSITIONS: dict[PackageState, frozenset[PackageState]] = {
         {PackageState.ANALYZING, PackageState.CANCELLED}
     ),
     PackageState.AWAITING_METADATA_REVIEW: frozenset(
-        {PackageState.MASTER_READY, PackageState.CANCELLED}
+        {
+            PackageState.AWAITING_NARRATION_REVIEW,
+            PackageState.MASTER_BUILDING,
+            PackageState.READY_FOR_ANALYSIS,
+            PackageState.CANCELLED,
+        }
+    ),
+    PackageState.AWAITING_NARRATION_REVIEW: frozenset(
+        {PackageState.GENERATING_NARRATION, PackageState.MASTER_BUILDING, PackageState.CANCELLED}
+    ),
+    PackageState.GENERATING_NARRATION: frozenset(
+        {PackageState.AWAITING_NARRATION_REVIEW, PackageState.MASTER_BUILDING}
+    ),
+    PackageState.MASTER_BUILDING: frozenset(
+        {PackageState.MASTER_FAILED, PackageState.MASTER_READY}
+    ),
+    PackageState.MASTER_FAILED: frozenset(
+        {PackageState.MASTER_BUILDING, PackageState.CANCELLED}
     ),
     PackageState.MASTER_READY: frozenset({PackageState.TRANSCRIBING}),
     PackageState.TRANSCRIBING: frozenset(

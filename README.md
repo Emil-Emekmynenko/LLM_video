@@ -19,6 +19,8 @@
 - заменяемый VLM provider и сохраняемые analysis runs;
 - локальный Qwen3-VL через OpenAI-совместимый endpoint;
 - единая временная шкала с дедупликацией, provenance и конфликтами;
+- операторское утверждение событий и analysis run;
+- версионируемые семантические метаданные, категории и главы;
 
 ## Требования
 
@@ -93,6 +95,21 @@ MEDIA_FACTORY_QWEN_MODEL_REVISION=e0a319f4d147b3916275a053b0583ca82f351e90
 `GET /api/v1/analysis-runs/{run_id}/clips`, а объединённые события — по
 `GET /api/v1/analysis-runs/{run_id}/events`. Веса модели и пользовательские
 видео в Git не добавляются.
+
+## Проверка анализа и метаданных
+
+Каждое событие нужно утвердить или отклонить через
+`PATCH /api/v1/analysis-events/{event_id}`. После этого analysis run утверждается
+через `POST /api/v1/analysis-runs/{run_id}/reviews`. Неутверждённый анализ не
+может стать источником метаданных.
+
+Черновик создаётся через
+`POST /api/v1/packages/{package_id}/metadata/proposals`. Изменения сохраняются
+как новые версии через `POST /api/v1/metadata/{metadata_id}/revisions`, а
+финальное подтверждение выполняется через
+`POST /api/v1/metadata/{metadata_id}/approve`. Утверждённая версия становится
+неизменяемой. Технические поля — длительность, разрешение и контрольные суммы —
+не генерируются из VLM.
 
 ## Тесты
 

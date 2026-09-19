@@ -6,13 +6,26 @@ from typing import Any
 from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile, status
 
 from media_factory.config import Settings, get_settings
-from media_factory.domain.analysis import AnalysisClip, AnalysisRun, TimelineEvent
+from media_factory.domain.analysis import (
+    AnalysisClip,
+    AnalysisReviewRequest,
+    AnalysisRun,
+    EventReviewRequest,
+    TimelineEvent,
+)
 from media_factory.domain.errors import (
     EntityNotFoundError,
     IdempotencyConflictError,
     VersionConflictError,
 )
 from media_factory.domain.job import Job, JobCreate
+from media_factory.domain.metadata import (
+    MetadataApprovalRequest,
+    MetadataCategory,
+    MetadataProposalRequest,
+    MetadataRevisionRequest,
+    MetadataVersion,
+)
 from media_factory.domain.models import StoredAsset, Transcript, ValidationIssue
 from media_factory.domain.package import Package, PackageCreate, PackageTransitionRequest
 from media_factory.domain.package_state import InvalidPackageTransition
@@ -20,12 +33,15 @@ from media_factory.persistence.analysis_repository import SQLAlchemyAnalysisRepo
 from media_factory.persistence.asset_repository import SQLAlchemyAssetRepository
 from media_factory.persistence.database import Database
 from media_factory.persistence.job_repository import SQLAlchemyJobRepository
+from media_factory.persistence.metadata_repository import SQLAlchemyMetadataRepository
 from media_factory.persistence.package_repository import SQLAlchemyPackageRepository
+from media_factory.services.analysis_review import AnalysisReviewError, AnalysisReviewService
 from media_factory.services.asset_ingest import AssetIngestService
 from media_factory.services.checksum import UploadTooLarge
 from media_factory.services.job_queue import RedisJobQueue
 from media_factory.services.job_service import JobDispatchError, JobService
 from media_factory.services.media_inspector import FFprobeMediaInspector, MediaInspectionError
+from media_factory.services.metadata_service import MetadataService, MetadataWorkflowError
 from media_factory.services.package_service import PackageService
 from media_factory.services.transcript_validator import validate_transcript
 
@@ -89,6 +105,34 @@ def get_analysis_repository(
     database: Database = Depends(get_database),
 ) -> SQLAlchemyAnalysisRepository:
     return SQLAlchemyAnalysisRepository(database.session_factory)
+
+
+def get_metadata_repository(
+    database: Database = Depends(get_database),
+) -> SQLAlchemyMetadataRepository:
+    return SQLAlchemyMetadataRepository(database.session_factory)
+
+
+def get_analysis_review_service(
+    database: Database = Depends(get_database),
+    repository: SQLAlchemyAnalysisRepository = Depends(get_analysis_repository),
+) -> AnalysisReviewService:
+    return AnalysisReviewService(
+        repository,
+        SQLAlchemyPackageRepository(database.session_factory),
+    )
+
+
+def get_metadata_service(
+    database: Database = Depends(get_database),
+    analyses: SQLAlchemyAnalysisRepository = Depends(get_analysis_repository),
+    metadata: SQLAlchemyMetadataRepository = Depends(get_metadata_repository),
+) -> MetadataService:
+    return MetadataService(
+        packages=SQLAlchemyPackageRepository(database.session_factory),
+        analyses=analyses,
+        metadata=metadata,
+    )
 
 
 @app.get("/api/v1/health/live")
@@ -283,6 +327,118 @@ def list_analysis_events(
         raise _not_found(exc) from exc
 
 
+@app.patch("/api/v1/analysis-events/{event_id}", response_model=TimelineEvent)
+def review_analysis_event(
+    event_id: str,
+    request: EventReviewRequest,
+    service: AnalysisReviewService = Depends(get_analysis_review_service),
+) -> TimelineEvent:
+    try:
+        return service.review_event(
+            event_id,
+            review_status=request.review_status,
+            expected_version=request.expected_version,
+        )
+    except EntityNotFoundError as exc:
+        raise _not_found(exc) from exc
+    except VersionConflictError as exc:
+        raise _version_conflict(exc) from exc
+    except AnalysisReviewError as exc:
+        raise _workflow_conflict(exc.code, str(exc)) from exc
+
+
+@app.post("/api/v1/analysis-runs/{run_id}/reviews", response_model=AnalysisRun)
+def review_analysis_run(
+    run_id: str,
+    request: AnalysisReviewRequest,
+    service: AnalysisReviewService = Depends(get_analysis_review_service),
+) -> AnalysisRun:
+    try:
+        return service.review_run(run_id, approved=request.approved)
+    except EntityNotFoundError as exc:
+        raise _not_found(exc) from exc
+    except AnalysisReviewError as exc:
+        raise _workflow_conflict(exc.code, str(exc)) from exc
+
+
+@app.get("/api/v1/metadata/categories", response_model=list[MetadataCategory])
+def list_metadata_categories(
+    repository: SQLAlchemyMetadataRepository = Depends(get_metadata_repository),
+) -> list[MetadataCategory]:
+    repository.ensure_default_categories()
+    return repository.list_categories()
+
+
+@app.post(
+    "/api/v1/packages/{package_id}/metadata/proposals",
+    response_model=MetadataVersion,
+    status_code=status.HTTP_201_CREATED,
+)
+def propose_metadata(
+    package_id: str,
+    request: MetadataProposalRequest,
+    service: MetadataService = Depends(get_metadata_service),
+) -> MetadataVersion:
+    try:
+        return service.propose(package_id, request.analysis_run_id)
+    except EntityNotFoundError as exc:
+        raise _not_found(exc) from exc
+    except MetadataWorkflowError as exc:
+        raise _workflow_conflict(exc.code, str(exc)) from exc
+
+
+@app.get(
+    "/api/v1/packages/{package_id}/metadata",
+    response_model=list[MetadataVersion],
+)
+def list_package_metadata(
+    package_id: str,
+    database: Database = Depends(get_database),
+    repository: SQLAlchemyMetadataRepository = Depends(get_metadata_repository),
+) -> list[MetadataVersion]:
+    try:
+        SQLAlchemyPackageRepository(database.session_factory).get(package_id)
+        return repository.list_for_package(package_id)
+    except EntityNotFoundError as exc:
+        raise _not_found(exc) from exc
+
+
+@app.post(
+    "/api/v1/metadata/{metadata_id}/revisions",
+    response_model=MetadataVersion,
+    status_code=status.HTTP_201_CREATED,
+)
+def revise_metadata(
+    metadata_id: str,
+    request: MetadataRevisionRequest,
+    service: MetadataService = Depends(get_metadata_service),
+) -> MetadataVersion:
+    try:
+        return service.revise(metadata_id, request)
+    except EntityNotFoundError as exc:
+        raise _not_found(exc) from exc
+    except VersionConflictError as exc:
+        raise _version_conflict(exc) from exc
+    except MetadataWorkflowError as exc:
+        raise _workflow_conflict(exc.code, str(exc)) from exc
+
+
+@app.post("/api/v1/metadata/{metadata_id}/approve", response_model=MetadataVersion)
+def approve_metadata(
+    metadata_id: str,
+    request: MetadataApprovalRequest,
+    service: MetadataService = Depends(get_metadata_service),
+) -> MetadataVersion:
+    try:
+        return service.approve(metadata_id, expected_version=request.expected_version)
+    except EntityNotFoundError as exc:
+        raise _not_found(exc) from exc
+    except VersionConflictError as exc:
+        raise _version_conflict(exc) from exc
+    except MetadataWorkflowError as exc:
+        raise _workflow_conflict(exc.code, str(exc)) from exc
+
+
 def _not_found(exc: EntityNotFoundError) -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
@@ -291,4 +447,23 @@ def _not_found(exc: EntityNotFoundError) -> HTTPException:
             "entity": exc.entity,
             "entity_id": exc.entity_id,
         },
+    )
+
+
+def _version_conflict(exc: VersionConflictError) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "version_conflict",
+            "entity": exc.entity,
+            "entity_id": exc.entity_id,
+            "expected_version": exc.expected_version,
+        },
+    )
+
+
+def _workflow_conflict(code: str, message: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={"code": code, "message": message},
     )

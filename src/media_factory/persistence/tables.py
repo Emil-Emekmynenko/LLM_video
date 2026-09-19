@@ -110,6 +110,7 @@ class AnalysisRunRow(Base):
     )
     source_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     state: Mapped[str] = mapped_column(String(20), nullable=False)
+    review_status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     provider_name: Mapped[str] = mapped_column(String(120), nullable=False)
     provider_version: Mapped[str] = mapped_column(String(80), nullable=False)
     prompt_version: Mapped[str] = mapped_column(String(80), nullable=False)
@@ -126,6 +127,7 @@ class AnalysisRunRow(Base):
         nullable=False,
     )
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class AnalysisClipRow(Base):
@@ -171,8 +173,54 @@ class AnalysisEventRow(Base):
     source_clip_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     conflict_event_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     review_status: Mapped[str] = mapped_column(String(20), nullable=False)
+    version: Mapped[int] = mapped_column(nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=utc_now,
         nullable=False,
     )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        onupdate=utc_now,
+        nullable=False,
+    )
+
+
+class MetadataCategoryRow(Base):
+    __tablename__ = "metadata_categories"
+
+    code: Mapped[str] = mapped_column(String(100), primary_key=True)
+    label: Mapped[str] = mapped_column(String(200), nullable=False)
+    active: Mapped[bool] = mapped_column(nullable=False, default=True)
+
+
+class MetadataVersionRow(Base):
+    __tablename__ = "metadata_versions"
+    __table_args__ = (
+        UniqueConstraint("package_id", "version", name="uq_metadata_package_version"),
+        Index("ix_metadata_versions_package_id", "package_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    package_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("packages.id"), nullable=False
+    )
+    analysis_run_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("analysis_runs.id"), nullable=False
+    )
+    version: Mapped[int] = mapped_column(nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    category: Mapped[str] = mapped_column(
+        String(100), ForeignKey("metadata_categories.code"), nullable=False
+    )
+    chapters: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
+    narration_language: Mapped[str | None] = mapped_column(String(35), nullable=True)
+    created_by: Mapped[str] = mapped_column(String(200), nullable=False)
+    change_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from media_factory.domain.analysis import (
     AnalysisClip,
+    AnalysisReviewStatus,
     AnalysisRun,
     AnalysisRunState,
     ClipAnalysis,
@@ -15,7 +16,7 @@ from media_factory.domain.analysis import (
     ReviewStatus,
     TimelineEvent,
 )
-from media_factory.domain.errors import EntityNotFoundError
+from media_factory.domain.errors import EntityNotFoundError, VersionConflictError
 from media_factory.persistence.tables import (
     AnalysisClipRow,
     AnalysisEventRow,
@@ -157,6 +158,52 @@ class SQLAlchemyAnalysisRepository:
         with self.session_factory() as session:
             return [self._event_to_domain(row) for row in session.scalars(statement)]
 
+    def get_event(self, event_id: str) -> TimelineEvent:
+        with self.session_factory() as session:
+            row = session.get(AnalysisEventRow, event_id)
+            if row is None:
+                raise EntityNotFoundError("analysis_event", event_id)
+            return self._event_to_domain(row)
+
+    def review_event(
+        self,
+        event_id: str,
+        *,
+        review_status: ReviewStatus,
+        expected_version: int,
+    ) -> TimelineEvent:
+        statement = (
+            update(AnalysisEventRow)
+            .where(AnalysisEventRow.id == event_id)
+            .where(AnalysisEventRow.version == expected_version)
+            .values(
+                review_status=review_status.value,
+                version=AnalysisEventRow.version + 1,
+                updated_at=utc_now(),
+            )
+        )
+        with self.session_factory.begin() as session:
+            result = cast(CursorResult[Any], session.execute(statement))
+            if result.rowcount != 1:
+                if session.get(AnalysisEventRow, event_id) is None:
+                    raise EntityNotFoundError("analysis_event", event_id)
+                raise VersionConflictError("analysis_event", event_id, expected_version)
+            row = session.get(AnalysisEventRow, event_id)
+            if row is None:
+                raise EntityNotFoundError("analysis_event", event_id)
+            return self._event_to_domain(row)
+
+    def set_review_status(
+        self,
+        run_id: str,
+        review_status: AnalysisReviewStatus,
+    ) -> AnalysisRun:
+        return self._update_run(
+            run_id,
+            review_status=review_status.value,
+            reviewed_at=utc_now(),
+        )
+
     def _update_run(self, run_id: str, **values: Any) -> AnalysisRun:
         with self.session_factory.begin() as session:
             result = cast(
@@ -181,6 +228,7 @@ class SQLAlchemyAnalysisRepository:
             package_id=row.package_id,
             source_sha256=row.source_sha256,
             state=AnalysisRunState(row.state),
+            review_status=AnalysisReviewStatus(row.review_status),
             provider_name=row.provider_name,
             provider_version=row.provider_version,
             prompt_version=row.prompt_version,
@@ -190,6 +238,7 @@ class SQLAlchemyAnalysisRepository:
             error_message=row.error_message,
             created_at=row.created_at,
             finished_at=row.finished_at,
+            reviewed_at=row.reviewed_at,
         )
 
     @staticmethod
@@ -219,5 +268,7 @@ class SQLAlchemyAnalysisRepository:
             source_clip_ids=row.source_clip_ids,
             conflict_event_ids=row.conflict_event_ids,
             review_status=ReviewStatus(row.review_status),
+            version=row.version,
             created_at=row.created_at,
+            updated_at=row.updated_at,
         )

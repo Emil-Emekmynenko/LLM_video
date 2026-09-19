@@ -11,6 +11,8 @@ from media_factory.persistence.tables import (  # noqa: F401
     AnalysisRunRow,
     AssetRow,
     JobRow,
+    MetadataCategoryRow,
+    MetadataVersionRow,
     PackageRow,
 )
 
