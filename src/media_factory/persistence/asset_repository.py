@@ -3,6 +3,7 @@ from pathlib import Path
 from sqlalchemy import Select, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from media_factory.domain.errors import EntityNotFoundError
 from media_factory.domain.models import MediaInspection, StoredAsset
 from media_factory.persistence.tables import AssetRow
 
@@ -23,6 +24,13 @@ class SQLAlchemyAssetRepository:
             row = session.scalar(statement)
             return self._to_domain(row) if row else None
 
+    def get(self, asset_id: str) -> StoredAsset:
+        with self.session_factory() as session:
+            row = session.get(AssetRow, asset_id)
+            if row is None:
+                raise EntityNotFoundError("asset", asset_id)
+            return self._to_domain(row)
+
     def save(self, asset: StoredAsset) -> None:
         inspection = asset.inspection.model_dump(mode="json") if asset.inspection else None
         row = AssetRow(
@@ -36,6 +44,16 @@ class SQLAlchemyAssetRepository:
         )
         with self.session_factory.begin() as session:
             session.add(row)
+
+    def update_inspection(self, asset_id: str, inspection: MediaInspection) -> StoredAsset:
+        with self.session_factory.begin() as session:
+            row = session.get(AssetRow, asset_id)
+            if row is None:
+                raise EntityNotFoundError("asset", asset_id)
+            row.inspection = inspection.model_dump(mode="json")
+            session.flush()
+            session.refresh(row)
+            return self._to_domain(row)
 
     @staticmethod
     def _to_domain(row: AssetRow) -> StoredAsset:

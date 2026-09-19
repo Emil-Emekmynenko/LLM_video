@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     ffprobe_bin: str = "ffprobe"
     database_url: str = "sqlite:///./data/media_factory.sqlite3"
     auto_create_schema: bool = True
+    redis_url: str = "redis://localhost:6379/0"
+    queue_name: str = "media-tasks"
 
 
 @lru_cache(maxsize=1)

@@ -2,7 +2,13 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from media_factory.api.app import app, get_database, get_ingest_service, get_inspector
+from media_factory.api.app import (
+    app,
+    get_database,
+    get_ingest_service,
+    get_inspector,
+    get_job_queue,
+)
 from media_factory.domain.models import MediaInspection, StreamInfo
 from media_factory.services.asset_ingest import AssetIngestService, InMemoryAssetIndex
 
@@ -29,6 +35,11 @@ class FakeDatabase:
         return self.available
 
 
+class FakeQueue:
+    def is_available(self) -> bool:
+        return True
+
+
 def test_health_live() -> None:
     client = TestClient(app)
     response = client.get("/api/v1/health/live")
@@ -41,6 +52,7 @@ def test_readiness_reports_each_dependency() -> None:
     inspector = FakeInspector()
     app.dependency_overrides[get_inspector] = lambda: inspector
     app.dependency_overrides[get_database] = lambda: FakeDatabase(available=False)
+    app.dependency_overrides[get_job_queue] = lambda: FakeQueue()
 
     try:
         client = TestClient(app)
@@ -51,7 +63,7 @@ def test_readiness_reports_each_dependency() -> None:
     assert response.status_code == 200
     assert response.json() == {
         "status": "not_ready",
-        "checks": {"database": False, "ffprobe": True},
+        "checks": {"database": False, "ffprobe": True, "redis": True},
     }
 
 

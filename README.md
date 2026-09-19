@@ -11,6 +11,9 @@
 - проверка word-level таймингов транскрипта;
 - API `/api/v1` и health checks;
 - unit- и API-тесты.
+- постоянные комплекты и optimistic locking переходов;
+- устойчивые фоновые задания с `Idempotency-Key`;
+- Redis/RQ worker, связанный со state machine.
 
 ## Требования
 
@@ -41,6 +44,23 @@ curl http://127.0.0.1:8000/api/v1/health/ready
 curl -F 'file=@example.mp4' http://127.0.0.1:8000/api/v1/assets/uploads
 ```
 
+Создание комплекта и запуск повторной инспекции:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/packages \
+  -H 'Content-Type: application/json' \
+  -d '{"source_asset_id":"<asset-id>"}'
+
+curl -X POST http://127.0.0.1:8000/api/v1/packages/<package-id>/transitions \
+  -H 'Content-Type: application/json' \
+  -d '{"target":"inspecting","expected_version":1}'
+
+curl -X POST http://127.0.0.1:8000/api/v1/packages/<package-id>/jobs \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: inspect-<package-id>-v1' \
+  -d '{"kind":"inspect_asset","payload":{}}'
+```
+
 Если `ffprobe` не установлен, `live` остаётся успешным, но `ready` возвращает состояние `not_ready`, а попытка инспекции завершается объяснимой ошибкой зависимости.
 
 ## Тесты
@@ -55,7 +75,8 @@ curl -F 'file=@example.mp4' http://127.0.0.1:8000/api/v1/assets/uploads
 
 ## Запуск через контейнеры
 
-Production-подобный локальный запуск использует PostgreSQL и образ API с FFmpeg:
+Production-подобный локальный запуск использует PostgreSQL, Redis, API с
+FFmpeg и отдельный background worker:
 
 ```bash
 docker compose up --build

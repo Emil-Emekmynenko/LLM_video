@@ -13,6 +13,17 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
+  redis:
+    image: redis:8-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - redis-data:/data
+
   api:
     build: .
     environment:
@@ -21,15 +32,38 @@ services:
       MEDIA_FACTORY_UPLOAD_DIR: /data/uploads
       MEDIA_FACTORY_FFPROBE_BIN: ffprobe
       MEDIA_FACTORY_AUTO_CREATE_SCHEMA: "false"
+      MEDIA_FACTORY_REDIS_URL: redis://redis:6379/0
+      MEDIA_FACTORY_QUEUE_NAME: media-tasks
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     ports:
       - "8000:8000"
     volumes:
       - media-data:/data
 
+  worker:
+    build: .
+    command: ["python", "-m", "media_factory.workers.main"]
+    environment:
+      MEDIA_FACTORY_ENV: development
+      MEDIA_FACTORY_DATABASE_URL: postgresql+psycopg://media_factory:local-development-only@postgres:5432/media_factory
+      MEDIA_FACTORY_UPLOAD_DIR: /data/uploads
+      MEDIA_FACTORY_FFPROBE_BIN: ffprobe
+      MEDIA_FACTORY_AUTO_CREATE_SCHEMA: "false"
+      MEDIA_FACTORY_REDIS_URL: redis://redis:6379/0
+      MEDIA_FACTORY_QUEUE_NAME: media-tasks
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - media-data:/data
+
 volumes:
   postgres-data:
+  redis-data:
   media-data:
-

@@ -3,15 +3,28 @@ from contextlib import asynccontextmanager
 from functools import lru_cache
 from typing import Any
 
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, status
+from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile, status
 
 from media_factory.config import Settings, get_settings
+from media_factory.domain.errors import (
+    EntityNotFoundError,
+    IdempotencyConflictError,
+    VersionConflictError,
+)
+from media_factory.domain.job import Job, JobCreate
 from media_factory.domain.models import StoredAsset, Transcript, ValidationIssue
+from media_factory.domain.package import Package, PackageCreate, PackageTransitionRequest
+from media_factory.domain.package_state import InvalidPackageTransition
 from media_factory.persistence.asset_repository import SQLAlchemyAssetRepository
 from media_factory.persistence.database import Database
+from media_factory.persistence.job_repository import SQLAlchemyJobRepository
+from media_factory.persistence.package_repository import SQLAlchemyPackageRepository
 from media_factory.services.asset_ingest import AssetIngestService
 from media_factory.services.checksum import UploadTooLarge
+from media_factory.services.job_queue import RedisJobQueue
+from media_factory.services.job_service import JobDispatchError, JobService
 from media_factory.services.media_inspector import FFprobeMediaInspector, MediaInspectionError
+from media_factory.services.package_service import PackageService
 from media_factory.services.transcript_validator import validate_transcript
 
 
@@ -40,6 +53,12 @@ def get_inspector(settings: Settings = Depends(get_settings)) -> FFprobeMediaIns
     return FFprobeMediaInspector(ffprobe_bin=settings.ffprobe_bin)
 
 
+@lru_cache(maxsize=1)
+def get_job_queue() -> RedisJobQueue:
+    settings = get_settings()
+    return RedisJobQueue(settings.redis_url, settings.queue_name)
+
+
 def get_ingest_service(
     settings: Settings = Depends(get_settings),
     inspector: FFprobeMediaInspector = Depends(get_inspector),
@@ -53,6 +72,17 @@ def get_ingest_service(
     )
 
 
+def get_package_service(database: Database = Depends(get_database)) -> PackageService:
+    return PackageService(SQLAlchemyPackageRepository(database.session_factory))
+
+
+def get_job_service(
+    database: Database = Depends(get_database),
+    queue: RedisJobQueue = Depends(get_job_queue),
+) -> JobService:
+    return JobService(SQLAlchemyJobRepository(database.session_factory), queue)
+
+
 @app.get("/api/v1/health/live")
 def live() -> dict[str, str]:
     return {"status": "ok"}
@@ -62,15 +92,18 @@ def live() -> dict[str, str]:
 def ready(
     inspector: FFprobeMediaInspector = Depends(get_inspector),
     database: Database = Depends(get_database),
+    queue: RedisJobQueue = Depends(get_job_queue),
 ) -> dict[str, Any]:
     ffprobe_available = inspector.is_available()
     database_available = database.is_available()
-    is_ready = ffprobe_available and database_available
+    redis_available = queue.is_available()
+    is_ready = ffprobe_available and database_available and redis_available
     return {
         "status": "ready" if is_ready else "not_ready",
         "checks": {
             "database": database_available,
             "ffprobe": ffprobe_available,
+            "redis": redis_available,
         },
     }
 
@@ -101,3 +134,118 @@ def upload_asset(
 @app.post("/api/v1/transcripts/validate", response_model=list[ValidationIssue])
 def validate_transcript_endpoint(transcript: Transcript) -> list[ValidationIssue]:
     return validate_transcript(transcript)
+
+
+@app.post(
+    "/api/v1/packages",
+    response_model=Package,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_package(
+    request: PackageCreate,
+    service: PackageService = Depends(get_package_service),
+) -> Package:
+    try:
+        return service.create(request.source_asset_id)
+    except EntityNotFoundError as exc:
+        raise _not_found(exc) from exc
+
+
+@app.get("/api/v1/packages/{package_id}", response_model=Package)
+def get_package(
+    package_id: str,
+    service: PackageService = Depends(get_package_service),
+) -> Package:
+    try:
+        return service.get(package_id)
+    except EntityNotFoundError as exc:
+        raise _not_found(exc) from exc
+
+
+@app.post("/api/v1/packages/{package_id}/transitions", response_model=Package)
+def transition_package(
+    package_id: str,
+    request: PackageTransitionRequest,
+    service: PackageService = Depends(get_package_service),
+) -> Package:
+    try:
+        return service.transition(
+            package_id,
+            target=request.target,
+            expected_version=request.expected_version,
+        )
+    except EntityNotFoundError as exc:
+        raise _not_found(exc) from exc
+    except VersionConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "version_conflict",
+                "entity": exc.entity,
+                "entity_id": exc.entity_id,
+                "expected_version": exc.expected_version,
+            },
+        ) from exc
+    except InvalidPackageTransition as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "invalid_package_transition",
+                "current": exc.current.value,
+                "target": exc.target.value,
+            },
+        ) from exc
+
+
+@app.post(
+    "/api/v1/packages/{package_id}/jobs",
+    response_model=Job,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def create_job(
+    package_id: str,
+    request: JobCreate,
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=255),
+    service: JobService = Depends(get_job_service),
+) -> Job:
+    try:
+        return service.create(
+            package_id=package_id,
+            kind=request.kind,
+            idempotency_key=idempotency_key,
+            payload=request.payload,
+        )
+    except EntityNotFoundError as exc:
+        raise _not_found(exc) from exc
+    except IdempotencyConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "idempotency_conflict",
+                "idempotency_key": exc.idempotency_key,
+            },
+        ) from exc
+    except JobDispatchError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "job_dispatch_failed", "message": str(exc)},
+        ) from exc
+
+
+@app.get("/api/v1/jobs/{job_id}", response_model=Job)
+def get_job(job_id: str, service: JobService = Depends(get_job_service)) -> Job:
+    try:
+        return service.get(job_id)
+    except EntityNotFoundError as exc:
+        raise _not_found(exc) from exc
+
+
+def _not_found(exc: EntityNotFoundError) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail={
+            "code": "not_found",
+            "entity": exc.entity,
+            "entity_id": exc.entity_id,
+        },
+    )

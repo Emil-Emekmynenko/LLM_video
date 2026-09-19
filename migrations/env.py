@@ -5,7 +5,7 @@ from sqlalchemy import engine_from_config, pool
 
 from media_factory.config import get_settings
 from media_factory.persistence.database import Base
-from media_factory.persistence.tables import AssetRow, PackageRow  # noqa: F401
+from media_factory.persistence.tables import AssetRow, JobRow, PackageRow  # noqa: F401
 
 config = context.config
 config.set_main_option("sqlalchemy.url", get_settings().database_url)
@@ -47,4 +47,3 @@ if context.is_offline_mode():
     run_migrations_offline()
 else:
     run_migrations_online()
-
