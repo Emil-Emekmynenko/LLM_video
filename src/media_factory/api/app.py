@@ -74,7 +74,10 @@ from media_factory.persistence.qa_repository import (
 from media_factory.persistence.transcription_repository import (
     SQLAlchemyTranscriptionRepository,
 )
-from media_factory.providers.storage_factory import build_object_storage_provider
+from media_factory.providers.storage_factory import (
+    build_checkpoint_cipher,
+    build_object_storage_provider,
+)
 from media_factory.services.analysis_review import AnalysisReviewError, AnalysisReviewService
 from media_factory.services.asset_ingest import AssetIngestService
 from media_factory.services.checksum import UploadTooLarge
@@ -342,8 +345,11 @@ def get_delivery_service(
     database: Database = Depends(get_database),
     builds: SQLAlchemyPackageBuildRepository = Depends(get_package_build_repository),
     reviews: SQLAlchemyQARepository = Depends(get_qa_repository),
-    deliveries: SQLAlchemyDeliveryRepository = Depends(get_delivery_repository),
 ) -> DeliveryService:
+    deliveries = SQLAlchemyDeliveryRepository(
+        database.session_factory,
+        checkpoint_cipher=build_checkpoint_cipher(settings),
+    )
     return DeliveryService(
         packages=SQLAlchemyPackageRepository(database.session_factory),
         builds=builds,

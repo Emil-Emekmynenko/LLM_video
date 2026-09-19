@@ -249,6 +249,7 @@ Worker повторно проверяет локальные SHA-256, загр�
 
 ```dotenv
 MEDIA_FACTORY_DELIVERY_PROVIDER=s3
+MEDIA_FACTORY_DELIVERY_CHECKPOINT_SECRET=<random-secret-at-least-32-characters>
 MEDIA_FACTORY_S3_BUCKET=customer-delivery
 MEDIA_FACTORY_S3_REGION=eu-central-1
 ```
@@ -267,17 +268,21 @@ credential chain SDK и не должны записываться в `.env` и�
 
 ```dotenv
 MEDIA_FACTORY_DELIVERY_PROVIDER=gcs
+MEDIA_FACTORY_DELIVERY_CHECKPOINT_SECRET=<random-secret-at-least-32-characters>
 MEDIA_FACTORY_GCS_BUCKET=customer-delivery
 MEDIA_FACTORY_GCS_PROJECT=example-project
 ```
 
-GCS-адаптер использует resumable upload SDK, checksum-проверку и
+GCS-адаптер использует resumable upload, checksum-проверку и
 `if_generation_match=0`, поэтому существующий объект не заменяется. Доступ
-получается через Application Default Credentials. Завершённые объекты
-сохраняются в `uploaded_objects` и повторно не передаются; незавершённая
-внутри одного объекта S3 multipart-сессия безопасно прерывается и при новом
-worker-запуске начинается заново. Персистентные межпроцессные checkpoints
-частей остаются отдельным этапом для очень больших объектов.
+получается через Application Default Credentials.
+
+Незавершённые S3 parts и GCS byte offset сохраняются в
+`upload_checkpoints`. После перезапуска worker повторная попытка сверяет
+состояние с облаком и продолжает с первой неподтверждённой части.
+S3 UploadId и GCS session URI хранятся в БД только в зашифрованном виде;
+`MEDIA_FACTORY_DELIVERY_CHECKPOINT_SECRET` нельзя коммитить в Git. Потеря или
+замена этого ключа делает активные checkpoints нечитаемыми.
 
 ## Тесты
 

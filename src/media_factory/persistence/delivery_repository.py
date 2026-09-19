@@ -11,9 +11,12 @@ from media_factory.domain.package_state import PackageState, ensure_transition_a
 from media_factory.persistence.tables import (
     DeliveryAttemptRow,
     PackageRow,
+    UploadCheckpointRow,
     UploadedObjectRow,
     utc_now,
 )
+from media_factory.providers.object_storage import TransferCheckpoint
+from media_factory.services.checkpoint_crypto import CheckpointCipher
 
 
 class DeliveryStateConflict(RuntimeError):
@@ -21,8 +24,18 @@ class DeliveryStateConflict(RuntimeError):
 
 
 class SQLAlchemyDeliveryRepository:
-    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+    def __init__(
+        self,
+        session_factory: sessionmaker[Session],
+        *,
+        checkpoint_cipher: CheckpointCipher | None = None,
+    ) -> None:
         self.session_factory = session_factory
+        self.checkpoint_cipher = checkpoint_cipher
+
+    @property
+    def checkpoints_enabled(self) -> bool:
+        return self.checkpoint_cipher is not None
 
     def create_or_get(
         self,
@@ -254,6 +267,98 @@ class SQLAlchemyDeliveryRepository:
             session.flush()
             session.refresh(row)
             return self._object_to_domain(row)
+
+    def get_checkpoint(
+        self,
+        *,
+        delivery_attempt_id: str,
+        remote_key: str,
+        provider: str,
+        source_size_bytes: int,
+        source_sha256: str,
+    ) -> TransferCheckpoint | None:
+        cipher = self._require_checkpoint_cipher()
+        with self.session_factory() as session:
+            row = session.scalar(
+                select(UploadCheckpointRow)
+                .where(UploadCheckpointRow.delivery_attempt_id == delivery_attempt_id)
+                .where(UploadCheckpointRow.remote_key == remote_key)
+            )
+            if row is None:
+                return None
+            if (
+                row.provider != provider
+                or row.source_size_bytes != source_size_bytes
+                or row.source_sha256 != source_sha256
+            ):
+                raise DeliveryStateConflict("upload checkpoint does not match delivery source")
+            return TransferCheckpoint(
+                session_token=cipher.decrypt(row.encrypted_session_token),
+                next_offset=row.next_offset,
+                completed_parts=list(row.completed_parts),
+            )
+
+    def save_checkpoint(
+        self,
+        *,
+        delivery_attempt_id: str,
+        remote_key: str,
+        provider: str,
+        source_size_bytes: int,
+        source_sha256: str,
+        checkpoint: TransferCheckpoint,
+    ) -> None:
+        cipher = self._require_checkpoint_cipher()
+        with self.session_factory.begin() as session:
+            row = session.scalar(
+                select(UploadCheckpointRow)
+                .where(UploadCheckpointRow.delivery_attempt_id == delivery_attempt_id)
+                .where(UploadCheckpointRow.remote_key == remote_key)
+            )
+            now = utc_now()
+            if row is None:
+                row = UploadCheckpointRow(
+                    id=str(uuid4()),
+                    delivery_attempt_id=delivery_attempt_id,
+                    remote_key=remote_key,
+                    provider=provider,
+                    source_size_bytes=source_size_bytes,
+                    source_sha256=source_sha256,
+                    encrypted_session_token=cipher.encrypt(checkpoint.session_token),
+                    next_offset=checkpoint.next_offset,
+                    completed_parts=checkpoint.completed_parts,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(row)
+            else:
+                if (
+                    row.provider != provider
+                    or row.source_size_bytes != source_size_bytes
+                    or row.source_sha256 != source_sha256
+                ):
+                    raise DeliveryStateConflict(
+                        "upload checkpoint does not match delivery source"
+                    )
+                row.encrypted_session_token = cipher.encrypt(checkpoint.session_token)
+                row.next_offset = checkpoint.next_offset
+                row.completed_parts = checkpoint.completed_parts
+                row.updated_at = now
+
+    def delete_checkpoint(self, *, delivery_attempt_id: str, remote_key: str) -> None:
+        with self.session_factory.begin() as session:
+            row = session.scalar(
+                select(UploadCheckpointRow)
+                .where(UploadCheckpointRow.delivery_attempt_id == delivery_attempt_id)
+                .where(UploadCheckpointRow.remote_key == remote_key)
+            )
+            if row is not None:
+                session.delete(row)
+
+    def _require_checkpoint_cipher(self) -> CheckpointCipher:
+        if self.checkpoint_cipher is None:
+            raise DeliveryStateConflict("persistent upload checkpoints are not configured")
+        return self.checkpoint_cipher
 
     @staticmethod
     def _find_by_idempotency(

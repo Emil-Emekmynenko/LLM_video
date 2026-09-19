@@ -23,7 +23,10 @@ from media_factory.providers.speech_recognition import (
     FasterWhisperProvider,
     SpeechRecognitionProvider,
 )
-from media_factory.providers.storage_factory import build_object_storage_provider
+from media_factory.providers.storage_factory import (
+    build_checkpoint_cipher,
+    build_object_storage_provider,
+)
 from media_factory.providers.text_to_speech import (
     FakeTextToSpeechProvider,
     TextToSpeechProvider,
@@ -314,6 +317,10 @@ def _execute_delivery(
 ) -> None:
     deliveries = SQLAlchemyDeliveryRepository(database.session_factory)
     try:
+        deliveries = SQLAlchemyDeliveryRepository(
+            database.session_factory,
+            checkpoint_cipher=build_checkpoint_cipher(settings),
+        )
         provider = build_object_storage_provider(settings)
     except Exception as exc:
         deliveries.fail(

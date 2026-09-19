@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     delivery_filesystem_root: Path = Path("data/deliveries")
     delivery_part_size: int = Field(default=32 * 1024 * 1024, ge=64 * 1024)
     delivery_timeout_seconds: float = Field(default=120.0, gt=0)
+    delivery_checkpoint_secret: SecretStr = SecretStr("")
     s3_bucket: str = ""
     s3_region: str | None = None
     s3_endpoint_url: str | None = None

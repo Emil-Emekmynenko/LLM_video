@@ -553,3 +553,33 @@ class UploadedObjectRow(Base):
         DateTime(timezone=True), default=utc_now, nullable=False
     )
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class UploadCheckpointRow(Base):
+    __tablename__ = "upload_checkpoints"
+    __table_args__ = (
+        UniqueConstraint(
+            "delivery_attempt_id", "remote_key", name="uq_upload_checkpoint_remote_key"
+        ),
+        Index("ix_upload_checkpoints_delivery_attempt_id", "delivery_attempt_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    delivery_attempt_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("delivery_attempts.id"), nullable=False
+    )
+    remote_key: Mapped[str] = mapped_column(Text, nullable=False)
+    provider: Mapped[str] = mapped_column(String(80), nullable=False)
+    source_size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    source_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    encrypted_session_token: Mapped[str] = mapped_column(Text, nullable=False)
+    next_offset: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    completed_parts: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
+    )

@@ -24,6 +24,7 @@ from media_factory.persistence.tables import (  # noqa: F401
     QAReviewRow,
     TranscriptionRunRow,
     TTSRunRow,
+    UploadCheckpointRow,
     UploadedObjectRow,
 )
 

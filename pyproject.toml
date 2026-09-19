@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
   "alembic>=1.14,<2",
+  "cryptography>=46,<51",
   "fastapi>=0.115,<1",
   "httpx>=0.27,<1",
   "sqlalchemy>=2.0,<3",
@@ -64,3 +65,7 @@ ignore = ["B008"]
 python_version = "3.12"
 strict = true
 packages = ["media_factory"]
+
+[[tool.mypy.overrides]]
+module = ["boto3", "botocore.*", "google.cloud.*"]
+ignore_missing_imports = true

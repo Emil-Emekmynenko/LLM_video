@@ -7,6 +7,18 @@ from media_factory.providers.object_storage import (
     ObjectStorageProvider,
 )
 from media_factory.providers.s3_storage import S3ObjectStorageProvider
+from media_factory.services.checkpoint_crypto import CheckpointCipher
+
+
+def build_checkpoint_cipher(settings: Settings) -> CheckpointCipher | None:
+    if settings.delivery_provider == "filesystem":
+        return None
+    secret = settings.delivery_checkpoint_secret.get_secret_value()
+    if not secret:
+        raise RuntimeError(
+            "cloud delivery requires MEDIA_FACTORY_DELIVERY_CHECKPOINT_SECRET"
+        )
+    return CheckpointCipher(secret)
 
 
 def build_object_storage_provider(
@@ -23,8 +35,8 @@ def build_object_storage_provider(
     if settings.delivery_provider == "s3":
         if s3_client is None:
             try:
-                import boto3  # type: ignore[import-not-found]
-                from botocore.config import Config  # type: ignore[import-not-found]
+                import boto3
+                from botocore.config import Config
             except ImportError as exc:
                 raise RuntimeError(
                     "S3 delivery requires the optional 'delivery-s3' dependencies"
@@ -47,7 +59,7 @@ def build_object_storage_provider(
     if settings.delivery_provider == "gcs":
         if gcs_client is None:
             try:
-                from google.cloud import storage  # type: ignore[import-not-found]
+                from google.cloud import storage
             except ImportError as exc:
                 raise RuntimeError(
                     "GCS delivery requires the optional 'delivery-gcs' dependencies"

@@ -17,7 +17,12 @@ from media_factory.persistence.package_build_repository import (
 )
 from media_factory.persistence.package_repository import SQLAlchemyPackageRepository
 from media_factory.persistence.qa_repository import SQLAlchemyQARepository
-from media_factory.providers.object_storage import ObjectStorageProvider
+from media_factory.providers.object_storage import (
+    ClearCheckpoint,
+    ObjectStorageProvider,
+    SaveCheckpoint,
+    TransferCheckpoint,
+)
 from media_factory.services.checksum import sha256_file
 from media_factory.services.package_artifacts import ensure_safe_relative_path
 
@@ -230,12 +235,56 @@ class DeliveryService:
             if existing is not None:
                 self._verify_remote(existing, item)
                 continue
-            remote = self.provider.upload_if_absent(
-                item.source,
-                item.remote_key,
-                expected_size=item.size_bytes,
-                expected_sha256=item.sha256,
-            )
+            checkpoint = None
+            save_callback: SaveCheckpoint | None = None
+            clear_callback: ClearCheckpoint | None = None
+            if self.provider.name in {"s3", "gcs"}:
+                checkpoint = self.deliveries.get_checkpoint(
+                    delivery_attempt_id=delivery_id,
+                    remote_key=item.remote_key,
+                    provider=self.provider.name,
+                    source_size_bytes=item.size_bytes,
+                    source_sha256=item.sha256,
+                )
+
+                def persist(
+                    value: TransferCheckpoint, *, current: DeliveryFile = item
+                ) -> None:
+                    self.deliveries.save_checkpoint(
+                        delivery_attempt_id=delivery_id,
+                        remote_key=current.remote_key,
+                        provider=self.provider.name,
+                        source_size_bytes=current.size_bytes,
+                        source_sha256=current.sha256,
+                        checkpoint=value,
+                    )
+
+                def clear(*, current: DeliveryFile = item) -> None:
+                    self.deliveries.delete_checkpoint(
+                        delivery_attempt_id=delivery_id,
+                        remote_key=current.remote_key,
+                    )
+
+                save_callback = persist
+                clear_callback = clear
+
+            if self.provider.name in {"s3", "gcs"}:
+                remote = self.provider.upload_if_absent(
+                    item.source,
+                    item.remote_key,
+                    expected_size=item.size_bytes,
+                    expected_sha256=item.sha256,
+                    checkpoint=checkpoint,
+                    save_checkpoint=save_callback,
+                    clear_checkpoint=clear_callback,
+                )
+            else:
+                remote = self.provider.upload_if_absent(
+                    item.source,
+                    item.remote_key,
+                    expected_size=item.size_bytes,
+                    expected_sha256=item.sha256,
+                )
             self.deliveries.record_object(
                 delivery_attempt_id=delivery_id,
                 role=item.role,
@@ -245,6 +294,8 @@ class DeliveryService:
                 sha256=item.sha256,
                 provider_checksum=remote.provider_checksum,
             )
+            if clear_callback is not None:
+                clear_callback()
 
     def _verify(self, delivery_id: str, files: list[DeliveryFile]) -> None:
         records = {

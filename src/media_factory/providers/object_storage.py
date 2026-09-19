@@ -1,8 +1,9 @@
 import hashlib
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 from uuid import uuid4
 
 from media_factory.services.package_artifacts import ensure_safe_relative_path
@@ -28,6 +29,17 @@ class RemoteObject:
     provider_checksum: str | None = None
 
 
+@dataclass(frozen=True)
+class TransferCheckpoint:
+    session_token: str
+    next_offset: int
+    completed_parts: list[dict[str, Any]]
+
+
+SaveCheckpoint = Callable[[TransferCheckpoint], None]
+ClearCheckpoint = Callable[[], None]
+
+
 class ObjectStorageProvider(Protocol):
     name: str
     destination: str
@@ -39,6 +51,9 @@ class ObjectStorageProvider(Protocol):
         *,
         expected_size: int,
         expected_sha256: str,
+        checkpoint: TransferCheckpoint | None = None,
+        save_checkpoint: SaveCheckpoint | None = None,
+        clear_checkpoint: ClearCheckpoint | None = None,
     ) -> RemoteObject: ...
 
     def inspect(self, key: str) -> RemoteObject: ...
@@ -59,6 +74,9 @@ class FilesystemObjectStorageProvider:
         *,
         expected_size: int,
         expected_sha256: str,
+        checkpoint: TransferCheckpoint | None = None,
+        save_checkpoint: SaveCheckpoint | None = None,
+        clear_checkpoint: ClearCheckpoint | None = None,
     ) -> RemoteObject:
         destination = self._path_for(key)
         destination.parent.mkdir(parents=True, exist_ok=True)

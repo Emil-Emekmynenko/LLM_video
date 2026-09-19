@@ -4,10 +4,13 @@ from pathlib import Path
 from typing import Any
 
 from media_factory.providers.object_storage import (
+    ClearCheckpoint,
     RemoteObject,
     RemoteObjectAlreadyExists,
     RemoteObjectInvalid,
     RemoteObjectMissing,
+    SaveCheckpoint,
+    TransferCheckpoint,
 )
 from media_factory.services.package_artifacts import ensure_safe_relative_path
 
@@ -43,12 +46,23 @@ class S3ObjectStorageProvider:
         *,
         expected_size: int,
         expected_sha256: str,
+        checkpoint: TransferCheckpoint | None = None,
+        save_checkpoint: SaveCheckpoint | None = None,
+        clear_checkpoint: ClearCheckpoint | None = None,
     ) -> RemoteObject:
         ensure_safe_relative_path(key)
-        self._verify_source(source, expected_size)
+        self._verify_source(source, expected_size, expected_sha256)
         if expected_size <= self.part_size:
             return self._put_object(source, key, expected_size, expected_sha256)
-        return self._multipart_upload(source, key, expected_size, expected_sha256)
+        return self._multipart_upload(
+            source,
+            key,
+            expected_size,
+            expected_sha256,
+            checkpoint=checkpoint,
+            save_checkpoint=save_checkpoint,
+            clear_checkpoint=clear_checkpoint,
+        )
 
     def inspect(self, key: str) -> RemoteObject:
         ensure_safe_relative_path(key)
@@ -112,6 +126,10 @@ class S3ObjectStorageProvider:
         key: str,
         expected_size: int,
         expected_sha256: str,
+        *,
+        checkpoint: TransferCheckpoint | None,
+        save_checkpoint: SaveCheckpoint | None,
+        clear_checkpoint: ClearCheckpoint | None,
     ) -> RemoteObject:
         create_arguments: dict[str, Any] = {
             "Bucket": self.bucket,
@@ -121,88 +139,212 @@ class S3ObjectStorageProvider:
         }
         if self.expected_bucket_owner:
             create_arguments["ExpectedBucketOwner"] = self.expected_bucket_owner
-        response = self.client.create_multipart_upload(**create_arguments)
-        upload_id = str(response["UploadId"])
-        parts: list[dict[str, Any]] = []
-        part_digests: list[bytes] = []
-        full_digest = hashlib.sha256()
-        uploaded_size = 0
-        try:
-            with source.open("rb") as source_file:
-                part_number = 1
-                while chunk := source_file.read(self.part_size):
-                    if part_number > MAX_MULTIPART_PARTS:
-                        raise ValueError("S3 multipart upload exceeds 10,000 parts")
-                    digest = hashlib.sha256(chunk).digest()
-                    full_digest.update(chunk)
-                    uploaded_size += len(chunk)
-                    checksum = base64.b64encode(digest).decode("ascii")
-                    upload_arguments: dict[str, Any] = {
-                        "Bucket": self.bucket,
-                        "Key": key,
-                        "UploadId": upload_id,
-                        "PartNumber": part_number,
-                        "Body": chunk,
-                        "ContentLength": len(chunk),
-                        "ChecksumSHA256": checksum,
-                    }
-                    if self.expected_bucket_owner:
-                        upload_arguments["ExpectedBucketOwner"] = self.expected_bucket_owner
-                    uploaded = self.client.upload_part(**upload_arguments)
-                    returned_checksum = uploaded.get("ChecksumSHA256")
-                    if returned_checksum != checksum:
-                        raise RemoteObjectInvalid(
-                            f"S3 part checksum mismatch: {key} part {part_number}"
-                        )
-                    parts.append(
-                        {
-                            "ETag": uploaded["ETag"],
-                            "PartNumber": part_number,
-                            "ChecksumSHA256": checksum,
-                        }
-                    )
-                    part_digests.append(digest)
-                    part_number += 1
-            if uploaded_size != expected_size or full_digest.hexdigest() != expected_sha256:
-                raise ValueError(f"delivery source changed: {source.name}")
-            composite = _composite_sha256(part_digests)
-            complete_arguments: dict[str, Any] = {
-                "Bucket": self.bucket,
-                "Key": key,
-                "UploadId": upload_id,
-                "MultipartUpload": {"Parts": parts},
-                "IfNoneMatch": "*",
-            }
-            if self.expected_bucket_owner:
-                complete_arguments["ExpectedBucketOwner"] = self.expected_bucket_owner
-            completed = self.client.complete_multipart_upload(**complete_arguments)
-            if completed.get("ChecksumSHA256") != composite:
-                raise RemoteObjectInvalid(f"S3 multipart checksum mismatch: {key}")
-        except Exception as exc:
+        if checkpoint is None:
+            response = self.client.create_multipart_upload(**create_arguments)
+            upload_id = str(response["UploadId"])
+            parts: list[dict[str, Any]] = []
+            uploaded_size = 0
+            self._save_checkpoint(save_checkpoint, upload_id, uploaded_size, parts)
+        else:
+            upload_id = checkpoint.session_token
+            parts = [dict(item) for item in checkpoint.completed_parts]
+            uploaded_size = checkpoint.next_offset
+            self._validate_checkpoint(parts, uploaded_size, expected_size)
             try:
-                abort_arguments: dict[str, Any] = {
+                remote_parts = self._list_remote_parts(key, upload_id)
+            except Exception as exc:
+                if _error_status(exc) == 404:
+                    if clear_checkpoint is not None:
+                        clear_checkpoint()
+                    return self._multipart_upload(
+                        source,
+                        key,
+                        expected_size,
+                        expected_sha256,
+                        checkpoint=None,
+                        save_checkpoint=save_checkpoint,
+                        clear_checkpoint=clear_checkpoint,
+                    )
+                raise
+            parts = self._reconcile_remote_parts(
+                source, key, saved=parts, remote=remote_parts, expected_size=expected_size
+            )
+            uploaded_size = sum(int(part["SizeBytes"]) for part in parts)
+            self._save_checkpoint(save_checkpoint, upload_id, uploaded_size, parts)
+
+        part_digests = [base64.b64decode(str(item["ChecksumSHA256"])) for item in parts]
+        with source.open("rb") as source_file:
+            source_file.seek(uploaded_size)
+            part_number = len(parts) + 1
+            while chunk := source_file.read(self.part_size):
+                if part_number > MAX_MULTIPART_PARTS:
+                    self._abort(key, upload_id)
+                    if clear_checkpoint is not None:
+                        clear_checkpoint()
+                    raise ValueError("S3 multipart upload exceeds 10,000 parts")
+                digest = hashlib.sha256(chunk).digest()
+                checksum = base64.b64encode(digest).decode("ascii")
+                upload_arguments: dict[str, Any] = {
                     "Bucket": self.bucket,
                     "Key": key,
                     "UploadId": upload_id,
+                    "PartNumber": part_number,
+                    "Body": chunk,
+                    "ContentLength": len(chunk),
+                    "ChecksumSHA256": checksum,
                 }
                 if self.expected_bucket_owner:
-                    abort_arguments["ExpectedBucketOwner"] = self.expected_bucket_owner
-                self.client.abort_multipart_upload(
-                    **abort_arguments,
+                    upload_arguments["ExpectedBucketOwner"] = self.expected_bucket_owner
+                uploaded = self.client.upload_part(**upload_arguments)
+                if uploaded.get("ChecksumSHA256") != checksum:
+                    self._abort(key, upload_id)
+                    if clear_checkpoint is not None:
+                        clear_checkpoint()
+                    raise RemoteObjectInvalid(
+                        f"S3 part checksum mismatch: {key} part {part_number}"
+                    )
+                uploaded_size += len(chunk)
+                parts.append(
+                    {
+                        "ETag": uploaded["ETag"],
+                        "PartNumber": part_number,
+                        "ChecksumSHA256": checksum,
+                        "SizeBytes": len(chunk),
+                    }
                 )
-            finally:
-                self._raise_upload_error(exc, key)
+                part_digests.append(digest)
+                self._save_checkpoint(save_checkpoint, upload_id, uploaded_size, parts)
+                part_number += 1
+        if uploaded_size != expected_size:
+            raise RemoteObjectInvalid(f"S3 upload offset mismatch: {key}")
+        composite = _composite_sha256(part_digests)
+        completion_parts = [
+            {name: part[name] for name in ("ETag", "PartNumber", "ChecksumSHA256")}
+            for part in parts
+        ]
+        complete_arguments: dict[str, Any] = {
+            "Bucket": self.bucket,
+            "Key": key,
+            "UploadId": upload_id,
+            "MultipartUpload": {"Parts": completion_parts},
+            "IfNoneMatch": "*",
+        }
+        if self.expected_bucket_owner:
+            complete_arguments["ExpectedBucketOwner"] = self.expected_bucket_owner
+        try:
+            completed = self.client.complete_multipart_upload(**complete_arguments)
+        except Exception as exc:
+            if _error_status(exc) in {409, 412}:
+                self._abort(key, upload_id)
+                if clear_checkpoint is not None:
+                    clear_checkpoint()
+            self._raise_upload_error(exc, key)
+        if completed.get("ChecksumSHA256") != composite:
+            raise RemoteObjectInvalid(f"S3 multipart checksum mismatch: {key}")
+        if clear_checkpoint is not None:
+            clear_checkpoint()
         remote = self.inspect(key)
         if remote.size_bytes != expected_size or remote.provider_checksum != composite:
             raise RemoteObjectInvalid(f"S3 object mismatch after multipart upload: {key}")
         return remote
 
     @staticmethod
-    def _verify_source(source: Path, expected_size: int) -> None:
+    def _verify_source(source: Path, expected_size: int, expected_sha256: str) -> None:
         if not source.is_file() or source.is_symlink():
             raise ValueError(f"delivery source is missing or unsafe: {source.name}")
-        if source.stat().st_size != expected_size:
+        digest = hashlib.sha256()
+        with source.open("rb") as source_file:
+            while chunk := source_file.read(1024 * 1024):
+                digest.update(chunk)
+        if source.stat().st_size != expected_size or digest.hexdigest() != expected_sha256:
             raise ValueError(f"delivery source changed: {source.name}")
+
+    def _list_remote_parts(self, key: str, upload_id: str) -> list[dict[str, Any]]:
+        arguments: dict[str, Any] = {
+            "Bucket": self.bucket,
+            "Key": key,
+            "UploadId": upload_id,
+        }
+        if self.expected_bucket_owner:
+            arguments["ExpectedBucketOwner"] = self.expected_bucket_owner
+        actual: list[dict[str, Any]] = []
+        while True:
+            response = self.client.list_parts(**arguments)
+            for part in response.get("Parts") or []:
+                actual.append(
+                    {
+                        "PartNumber": part["PartNumber"],
+                        "ETag": part["ETag"],
+                        "ChecksumSHA256": part["ChecksumSHA256"],
+                        "SizeBytes": part["Size"],
+                    }
+                )
+            if not response.get("IsTruncated"):
+                break
+            arguments["PartNumberMarker"] = response["NextPartNumberMarker"]
+        return actual
+
+    def _reconcile_remote_parts(
+        self,
+        source: Path,
+        key: str,
+        *,
+        saved: list[dict[str, Any]],
+        remote: list[dict[str, Any]],
+        expected_size: int,
+    ) -> list[dict[str, Any]]:
+        if len(remote) < len(saved):
+            raise RemoteObjectInvalid(f"S3 remote upload lost checkpointed parts: {key}")
+        for checkpoint_part, remote_part in zip(saved, remote, strict=False):
+            if any(
+                checkpoint_part.get(name) != remote_part.get(name)
+                for name in ("PartNumber", "ETag", "ChecksumSHA256", "SizeBytes")
+            ):
+                raise RemoteObjectInvalid(f"S3 checkpoint differs from remote parts: {key}")
+        self._validate_checkpoint(
+            remote,
+            sum(int(part["SizeBytes"]) for part in remote),
+            expected_size,
+        )
+        with source.open("rb") as source_file:
+            for part in remote:
+                size = int(part["SizeBytes"])
+                chunk = source_file.read(size)
+                checksum = base64.b64encode(hashlib.sha256(chunk).digest()).decode("ascii")
+                if len(chunk) != size or checksum != part["ChecksumSHA256"]:
+                    raise RemoteObjectInvalid(f"S3 remote part differs from source: {key}")
+        return remote
+
+    @staticmethod
+    def _validate_checkpoint(
+        parts: list[dict[str, Any]], next_offset: int, expected_size: int
+    ) -> None:
+        if [part.get("PartNumber") for part in parts] != list(range(1, len(parts) + 1)):
+            raise RemoteObjectInvalid("S3 checkpoint part sequence is invalid")
+        if sum(int(part.get("SizeBytes", -1)) for part in parts) != next_offset:
+            raise RemoteObjectInvalid("S3 checkpoint offset is invalid")
+        if not 0 <= next_offset <= expected_size:
+            raise RemoteObjectInvalid("S3 checkpoint exceeds source size")
+
+    @staticmethod
+    def _save_checkpoint(
+        callback: SaveCheckpoint | None,
+        upload_id: str,
+        next_offset: int,
+        parts: list[dict[str, Any]],
+    ) -> None:
+        if callback is not None:
+            callback(TransferCheckpoint(upload_id, next_offset, [dict(item) for item in parts]))
+
+    def _abort(self, key: str, upload_id: str) -> None:
+        arguments: dict[str, Any] = {
+            "Bucket": self.bucket,
+            "Key": key,
+            "UploadId": upload_id,
+        }
+        if self.expected_bucket_owner:
+            arguments["ExpectedBucketOwner"] = self.expected_bucket_owner
+        self.client.abort_multipart_upload(**arguments)
 
     @staticmethod
     def _raise_upload_error(exc: Exception, key: str) -> None:
