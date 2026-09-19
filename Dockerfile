@@ -15,10 +15,9 @@ COPY migrations ./migrations
 COPY alembic.ini ./
 COPY scripts ./scripts
 
-RUN python -m pip install --no-cache-dir . \
+RUN python -m pip install --no-cache-dir '.[asr]' \
     && chmod +x /app/scripts/start-api.sh
 
 EXPOSE 8000
 
 CMD ["/app/scripts/start-api.sh"]
-

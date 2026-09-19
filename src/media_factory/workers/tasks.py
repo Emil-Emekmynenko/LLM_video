@@ -9,6 +9,14 @@ from media_factory.persistence.master_repository import SQLAlchemyMasterReposito
 from media_factory.persistence.metadata_repository import SQLAlchemyMetadataRepository
 from media_factory.persistence.narration_repository import SQLAlchemyNarrationRepository
 from media_factory.persistence.package_repository import SQLAlchemyPackageRepository
+from media_factory.persistence.transcription_repository import (
+    SQLAlchemyTranscriptionRepository,
+)
+from media_factory.providers.speech_recognition import (
+    FakeSpeechRecognitionProvider,
+    FasterWhisperProvider,
+    SpeechRecognitionProvider,
+)
 from media_factory.providers.text_to_speech import (
     FakeTextToSpeechProvider,
     TextToSpeechProvider,
@@ -27,6 +35,7 @@ from media_factory.services.master_service import MasterService
 from media_factory.services.media_inspector import FFprobeMediaInspector, MediaInspectionError
 from media_factory.services.narration_service import NarrationService
 from media_factory.services.scene_detection import PySceneDetector
+from media_factory.services.transcription_service import TranscriptionService
 from media_factory.services.video_processing import FFmpegClipExtractor, FFmpegProxyGenerator
 
 
@@ -50,6 +59,8 @@ def execute_job(job_id: str) -> None:
             _execute_narration(settings, database, packages, job.package_id, script_id)
         elif job.kind is JobKind.BUILD_MASTER:
             _execute_master_build(settings, database, packages, assets, job.package_id)
+        elif job.kind is JobKind.TRANSCRIBE_MASTER:
+            _execute_transcription(settings, database, packages, job.package_id)
         else:
             raise UnsupportedJobKind(job.kind.value)
         jobs.mark_succeeded(job.id)
@@ -183,3 +194,38 @@ def _execute_master_build(
         container_extension=settings.master_container_extension,
     )
     service.build(package_id)
+
+
+def _execute_transcription(
+    settings: Settings,
+    database: Database,
+    packages: SQLAlchemyPackageRepository,
+    package_id: str,
+) -> None:
+    service = TranscriptionService(
+        packages=packages,
+        masters=SQLAlchemyMasterRepository(database.session_factory),
+        transcriptions=SQLAlchemyTranscriptionRepository(database.session_factory),
+        duration_tolerance=settings.transcript_duration_tolerance,
+    )
+    service.transcribe(package_id, _build_asr_provider(settings))
+
+
+def _build_asr_provider(settings: Settings) -> SpeechRecognitionProvider:
+    if settings.asr_provider == "fake":
+        if not settings.allow_fake_asr:
+            raise RuntimeError("Fake ASR provider is disabled")
+        if settings.environment != "development":
+            raise RuntimeError("Fake ASR provider is forbidden outside development")
+        return FakeSpeechRecognitionProvider()
+    if settings.asr_provider == "faster-whisper":
+        return FasterWhisperProvider(
+            model_name=settings.faster_whisper_model,
+            model_revision=settings.faster_whisper_model_revision,
+            device=settings.faster_whisper_device,
+            compute_type=settings.faster_whisper_compute_type,
+            language=settings.faster_whisper_language,
+            beam_size=settings.faster_whisper_beam_size,
+            vad_filter=settings.faster_whisper_vad_filter,
+        )
+    raise RuntimeError(f"Unsupported ASR provider: {settings.asr_provider}")

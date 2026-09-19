@@ -31,6 +31,11 @@ class PackageService:
             PackageState.MASTER_BUILDING,
             PackageState.MASTER_FAILED,
             PackageState.MASTER_READY,
+            PackageState.TRANSCRIBING,
+            PackageState.TRANSCRIPTION_FAILED,
+            PackageState.ALIGNING,
+            PackageState.ALIGNMENT_FAILED,
+            PackageState.PACKAGING,
         }:
             raise GuardedPackageTransition(target)
         current = self.repository.get(package_id)

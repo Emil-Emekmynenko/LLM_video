@@ -354,3 +354,36 @@ class MasterBuildRow(Base):
         DateTime(timezone=True), default=utc_now, nullable=False
     )
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class TranscriptionRunRow(Base):
+    __tablename__ = "transcription_runs"
+    __table_args__ = (Index("ix_transcription_runs_package_id", "package_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    package_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("packages.id"), nullable=False
+    )
+    master_build_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("master_builds.id"), nullable=False
+    )
+    master_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(20), nullable=False)
+    provider_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    provider_version: Mapped[str] = mapped_column(String(80), nullable=False)
+    model_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    model_revision: Mapped[str] = mapped_column(String(120), nullable=False)
+    parameters: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    language: Mapped[str | None] = mapped_column(String(35), nullable=True)
+    language_probability: Mapped[float | None] = mapped_column(nullable=True)
+    text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    transcript: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    validation_issues: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

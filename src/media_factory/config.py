@@ -42,6 +42,16 @@ class Settings(BaseSettings):
     master_dir: Path = Path("data/masters")
     master_container_extension: str = "mp4"
     master_duration_tolerance: float = Field(default=0.1, ge=0)
+    transcript_duration_tolerance: float = Field(default=0.5, ge=0)
+    asr_provider: str = "fake"
+    allow_fake_asr: bool = True
+    faster_whisper_model: str = "small"
+    faster_whisper_model_revision: str = "unversioned"
+    faster_whisper_device: str = "auto"
+    faster_whisper_compute_type: str = "int8"
+    faster_whisper_language: str | None = None
+    faster_whisper_beam_size: int = Field(default=5, ge=1)
+    faster_whisper_vad_filter: bool = True
 
 
 @lru_cache(maxsize=1)

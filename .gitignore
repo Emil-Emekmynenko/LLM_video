@@ -30,6 +30,11 @@ logs/
 *.mkv
 *.wav
 *.zip
+*.safetensors
+*.pt
+*.pth
+*.onnx
+*.gguf
 *.db
 *.sqlite
 *.sqlite3

@@ -87,7 +87,7 @@ ALLOWED_TRANSITIONS: dict[PackageState, frozenset[PackageState]] = {
     ),
     PackageState.ALIGNING: frozenset({PackageState.ALIGNMENT_FAILED, PackageState.PACKAGING}),
     PackageState.ALIGNMENT_FAILED: frozenset(
-        {PackageState.ALIGNING, PackageState.CANCELLED}
+        {PackageState.TRANSCRIBING, PackageState.ALIGNING, PackageState.CANCELLED}
     ),
     PackageState.PACKAGING: frozenset(
         {PackageState.VALIDATION_FAILED, PackageState.AWAITING_QA}
