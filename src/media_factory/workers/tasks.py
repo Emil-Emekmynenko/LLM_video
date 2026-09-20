@@ -29,6 +29,7 @@ from media_factory.providers.storage_factory import (
 )
 from media_factory.providers.text_to_speech import (
     FakeTextToSpeechProvider,
+    PiperTextToSpeechProvider,
     TextToSpeechProvider,
 )
 from media_factory.providers.video_understanding import (
@@ -206,6 +207,16 @@ def _build_tts_provider(settings: Settings) -> TextToSpeechProvider:
         if settings.environment != "development":
             raise RuntimeError("Fake TTS provider is forbidden outside development")
         return FakeTextToSpeechProvider()
+    if settings.tts_provider == "piper":
+        if settings.piper_model_path is None:
+            raise RuntimeError("Piper TTS requires MEDIA_FACTORY_PIPER_MODEL_PATH")
+        return PiperTextToSpeechProvider(
+            model_path=settings.piper_model_path,
+            model_revision=settings.piper_model_revision,
+            piper_bin=settings.piper_bin,
+            speaker=settings.piper_speaker,
+            length_scale=settings.piper_length_scale,
+        )
     raise RuntimeError(f"Unsupported TTS provider: {settings.tts_provider}")
 
 

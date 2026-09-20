@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     narration_dir: Path = Path("data/narration")
     tts_provider: str = "fake"
     allow_fake_tts: bool = True
+    piper_bin: str = "piper"
+    piper_model_path: Path | None = None
+    piper_model_revision: str = "unversioned"
+    piper_speaker: int | None = Field(default=None, ge=0)
+    piper_length_scale: float = Field(default=1.0, gt=0, le=5)
     allow_additional_audio: bool = False
     master_dir: Path = Path("data/masters")
     master_container_extension: str = "mp4"

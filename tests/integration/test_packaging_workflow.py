@@ -1,7 +1,9 @@
 import json
 from pathlib import Path
+from zipfile import ZipFile
 
 from media_factory.domain.analysis import AnalysisReviewStatus
+from media_factory.domain.delivery import DeliveryCreateRequest, DeliveryState
 from media_factory.domain.metadata import MetadataContent
 from media_factory.domain.models import (
     MediaInspection,
@@ -14,9 +16,12 @@ from media_factory.domain.models import (
 from media_factory.domain.narration import AudioPolicy
 from media_factory.domain.package_state import PackageState
 from media_factory.domain.packaging import PackageBuildState
+from media_factory.domain.qa import ExportState, QAReviewRequest
 from media_factory.persistence.analysis_repository import SQLAlchemyAnalysisRepository
 from media_factory.persistence.asset_repository import SQLAlchemyAssetRepository
 from media_factory.persistence.database import Database
+from media_factory.persistence.delivery_repository import SQLAlchemyDeliveryRepository
+from media_factory.persistence.export_repository import SQLAlchemyExportRepository
 from media_factory.persistence.master_repository import SQLAlchemyMasterRepository
 from media_factory.persistence.metadata_repository import SQLAlchemyMetadataRepository
 from media_factory.persistence.narration_repository import SQLAlchemyNarrationRepository
@@ -24,11 +29,16 @@ from media_factory.persistence.package_build_repository import (
     SQLAlchemyPackageBuildRepository,
 )
 from media_factory.persistence.package_repository import SQLAlchemyPackageRepository
+from media_factory.persistence.qa_repository import SQLAlchemyQARepository
 from media_factory.persistence.transcription_repository import (
     SQLAlchemyTranscriptionRepository,
 )
+from media_factory.providers.object_storage import FilesystemObjectStorageProvider
 from media_factory.services.checksum import sha256_file
+from media_factory.services.delivery_service import DeliveryService
+from media_factory.services.export_service import LocalExportService
 from media_factory.services.packaging_service import PackagingService
+from media_factory.services.qa_service import QAService
 
 
 class FakeDecoder:
@@ -250,3 +260,49 @@ def test_package_build_creates_validated_versioned_sidecars(tmp_path: Path) -> N
     assert manifest["transcript_master_sha256"] == master_sha256
     assert manifest["validation"] == []
     assert packages.get(package.id).state is PackageState.AWAITING_QA
+
+    reviews = SQLAlchemyQARepository(database.session_factory)
+    QAService(packages=packages, builds=builds, reviews=reviews).review(
+        package.id,
+        QAReviewRequest(
+            package_build_id=build.id,
+            approved=True,
+            reviewer="pilot-qa",
+        ),
+    )
+    exports = SQLAlchemyExportRepository(database.session_factory)
+    exported = LocalExportService(
+        packages=packages,
+        builds=builds,
+        reviews=reviews,
+        exports=exports,
+        export_dir=tmp_path / "exports",
+        chunk_size=64 * 1024,
+    ).export(package.id, build.id)
+    assert exported.state is ExportState.SUCCEEDED
+    assert exported.archive_path is not None
+    with ZipFile(exported.archive_path) as archive:
+        assert len(archive.namelist()) == 4
+
+    deliveries = SQLAlchemyDeliveryRepository(database.session_factory)
+    delivery_service = DeliveryService(
+        packages=packages,
+        builds=builds,
+        reviews=reviews,
+        deliveries=deliveries,
+        provider=FilesystemObjectStorageProvider(
+            tmp_path / "delivery",
+            chunk_size=64 * 1024,
+        ),
+    )
+    delivery = delivery_service.create(
+        package.id,
+        DeliveryCreateRequest(package_build_id=build.id, prefix="pilot"),
+        idempotency_key="pilot-delivery",
+    )
+    completed = delivery_service.deliver(delivery.id)
+
+    assert completed.state is DeliveryState.COMPLETE
+    assert completed.package_complete_at is not None
+    assert packages.get(package.id).state is PackageState.COMPLETE
+    assert all(item.verified_at is not None for item in deliveries.list_objects(delivery.id))

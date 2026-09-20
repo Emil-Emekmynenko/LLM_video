@@ -55,6 +55,7 @@ media_factory = ["ui/*", "schemas/**/*.json"]
 [tool.pytest.ini_options]
 addopts = "-q --disable-warnings --strict-markers"
 testpaths = ["tests"]
+markers = ["ffmpeg: tests that execute local FFmpeg and ffprobe binaries"]
 
 [tool.ruff]
 line-length = 100

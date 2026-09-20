@@ -19,6 +19,7 @@ from media_factory.domain.models import StoredAsset
 from media_factory.domain.package_state import PackageState
 from media_factory.persistence.analysis_repository import SQLAlchemyAnalysisRepository
 from media_factory.persistence.asset_repository import SQLAlchemyAssetRepository
+from media_factory.persistence.audit_repository import SQLAlchemyAuditRepository
 from media_factory.persistence.database import Database
 from media_factory.persistence.metadata_repository import SQLAlchemyMetadataRepository
 from media_factory.persistence.package_repository import SQLAlchemyPackageRepository
@@ -139,3 +140,16 @@ def test_review_metadata_revision_and_approval_workflow(tmp_path: Path) -> None:
     ]
     assert approved.version == 2
     assert packages.get(package.id).state is PackageState.AWAITING_NARRATION_REVIEW
+    audit_actions = {
+        event.action
+        for event in SQLAlchemyAuditRepository(database.session_factory).list_events(
+            package_id=package.id
+        )
+    }
+    assert {
+        "analysis_event.reviewed",
+        "analysis_run.reviewed",
+        "metadata.created",
+        "metadata.revised",
+        "metadata.approved",
+    } <= audit_actions

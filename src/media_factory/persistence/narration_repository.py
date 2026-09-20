@@ -17,6 +17,7 @@ from media_factory.domain.narration import (
     TTSRun,
     TTSRunState,
 )
+from media_factory.persistence.audit_repository import add_audit_event
 from media_factory.persistence.tables import (
     AudioDecisionRow,
     AudioTrackRow,
@@ -56,6 +57,14 @@ class SQLAlchemyNarrationRepository:
                 change_note=change_note,
             )
             session.add(row)
+            add_audit_event(
+                session,
+                action="narration.created",
+                entity_type="narration_script",
+                entity_id=row.id,
+                package_id=package_id,
+                details={"version": row.version},
+            )
             session.flush()
             session.refresh(row)
             return self._script_to_domain(row)
@@ -90,6 +99,14 @@ class SQLAlchemyNarrationRepository:
                 change_note=change_note,
             )
             session.add(row)
+            add_audit_event(
+                session,
+                action="narration.revised",
+                entity_type="narration_script",
+                entity_id=row.id,
+                package_id=base.package_id,
+                details={"from_version": base.version, "to_version": row.version},
+            )
             session.flush()
             session.refresh(row)
             return self._script_to_domain(row)
@@ -108,6 +125,14 @@ class SQLAlchemyNarrationRepository:
                 raise VersionConflictError("narration_script", script_id, expected_version)
             row.status = NarrationScriptStatus.APPROVED.value
             row.approved_at = utc_now()
+            add_audit_event(
+                session,
+                action="narration.approved",
+                entity_type="narration_script",
+                entity_id=row.id,
+                package_id=row.package_id,
+                details={"version": row.version},
+            )
             session.flush()
             session.refresh(row)
             return self._script_to_domain(row)

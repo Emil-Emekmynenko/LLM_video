@@ -17,6 +17,7 @@ from media_factory.domain.analysis import (
     TimelineEvent,
 )
 from media_factory.domain.errors import EntityNotFoundError, VersionConflictError
+from media_factory.persistence.audit_repository import add_audit_event
 from media_factory.persistence.tables import (
     AnalysisClipRow,
     AnalysisEventRow,
@@ -200,6 +201,17 @@ class SQLAlchemyAnalysisRepository:
             row = session.get(AnalysisEventRow, event_id)
             if row is None:
                 raise EntityNotFoundError("analysis_event", event_id)
+            run = session.get(AnalysisRunRow, row.analysis_run_id)
+            if run is None:
+                raise EntityNotFoundError("analysis_run", row.analysis_run_id)
+            add_audit_event(
+                session,
+                action="analysis_event.reviewed",
+                entity_type="analysis_event",
+                entity_id=row.id,
+                package_id=run.package_id,
+                details={"review_status": review_status.value, "version": row.version},
+            )
             return self._event_to_domain(row)
 
     def set_review_status(
@@ -228,6 +240,15 @@ class SQLAlchemyAnalysisRepository:
             row = session.get(AnalysisRunRow, run_id)
             if row is None:
                 raise EntityNotFoundError("analysis_run", run_id)
+            if "review_status" in values:
+                add_audit_event(
+                    session,
+                    action="analysis_run.reviewed",
+                    entity_type="analysis_run",
+                    entity_id=row.id,
+                    package_id=row.package_id,
+                    details={"review_status": values["review_status"]},
+                )
             return self._run_to_domain(row)
 
     @staticmethod

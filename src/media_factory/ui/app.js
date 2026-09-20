@@ -27,7 +27,7 @@ const pipelineGroups = [
 
 const appState = {
   packages: [], assets: new Map(), selectedId: null, busy: false,
-  apiKey: sessionStorage.getItem("mediaFactoryApiKey") || ""
+  apiKey: sessionStorage.getItem("mediaFactoryApiKey") || "", principal: null
 };
 const $ = (selector) => document.querySelector(selector);
 
@@ -58,8 +58,9 @@ async function api(path, options = {}) {
 async function loadPrincipal() {
   try {
     const principal = await api("/api/v1/auth/me");
+    appState.principal = principal;
     $("#principal").textContent = `${principal.actor} · ${principal.role}`;
-  } catch (_) { $("#principal").textContent = "требуется ключ"; }
+  } catch (_) { appState.principal = null; $("#principal").textContent = "требуется ключ"; }
 }
 
 function tone(value) {
@@ -731,7 +732,7 @@ async function submitQa(item, build, approved, reason) {
   try {
     await api(`/api/v1/packages/${item.id}/approve`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ package_build_id: build.id, approved, reviewer: "operator", reason: reason.trim() || null })
+      body: JSON.stringify({ package_build_id: build.id, approved, reviewer: appState.principal?.actor || "operator", reason: reason.trim() || null })
     });
     $("#review-dialog").close(); toast(approved ? "Сборка прошла QA" : "Сборка отклонена"); await loadPackages();
   } catch (error) { toast(error.message, true); }

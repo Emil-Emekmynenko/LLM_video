@@ -13,6 +13,7 @@ from media_factory.domain.metadata import (
     MetadataStatus,
     MetadataVersion,
 )
+from media_factory.persistence.audit_repository import add_audit_event
 from media_factory.persistence.tables import (
     MetadataCategoryRow,
     MetadataVersionRow,
@@ -85,6 +86,14 @@ class SQLAlchemyMetadataRepository:
                 change_note=change_note,
             )
             session.add(row)
+            add_audit_event(
+                session,
+                action="metadata.created",
+                entity_type="metadata_version",
+                entity_id=row.id,
+                package_id=package_id,
+                details={"version": row.version},
+            )
             session.flush()
             session.refresh(row)
             return self._to_domain(row)
@@ -120,6 +129,14 @@ class SQLAlchemyMetadataRepository:
                 change_note=change_note,
             )
             session.add(row)
+            add_audit_event(
+                session,
+                action="metadata.revised",
+                entity_type="metadata_version",
+                entity_id=row.id,
+                package_id=base.package_id,
+                details={"from_version": base.version, "to_version": row.version},
+            )
             session.flush()
             session.refresh(row)
             return self._to_domain(row)
@@ -147,6 +164,14 @@ class SQLAlchemyMetadataRepository:
             )
             if result.rowcount != 1:
                 raise VersionConflictError("metadata_version", metadata_id, expected_version)
+            add_audit_event(
+                session,
+                action="metadata.approved",
+                entity_type="metadata_version",
+                entity_id=row.id,
+                package_id=row.package_id,
+                details={"version": row.version},
+            )
             session.expire(row)
             session.refresh(row)
             return self._to_domain(row)
