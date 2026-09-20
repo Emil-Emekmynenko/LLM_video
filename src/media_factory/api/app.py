@@ -20,7 +20,7 @@ from fastapi import (
     UploadFile,
     status,
 )
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from media_factory.api.security import (
@@ -58,6 +58,7 @@ from media_factory.domain.metadata import (
     MetadataRevisionRequest,
     MetadataVersion,
 )
+from media_factory.domain.metrics import MetricsSummary
 from media_factory.domain.models import StoredAsset, Transcript, ValidationIssue
 from media_factory.domain.narration import (
     AudioDecision,
@@ -117,6 +118,7 @@ from media_factory.services.master_processing import (
 from media_factory.services.master_service import MasterService, MasterWorkflowError
 from media_factory.services.media_inspector import FFprobeMediaInspector, MediaInspectionError
 from media_factory.services.metadata_service import MetadataService, MetadataWorkflowError
+from media_factory.services.metrics_service import MetricsService
 from media_factory.services.narration_service import NarrationService, NarrationWorkflowError
 from media_factory.services.package_service import GuardedPackageTransition, PackageService
 from media_factory.services.packaging_service import (
@@ -165,7 +167,7 @@ http_logger = logging.getLogger("media_factory.http")
 async def request_security_audit(request: Request, call_next: Any) -> Any:
     started = time.perf_counter()
     correlation_id = request.headers.get("X-Request-ID") or str(uuid4())
-    api_path = request.url.path.startswith("/api/v1/")
+    api_path = request.url.path.startswith("/api/v1/") or request.url.path == "/metrics"
     if api_path and request.url.path not in {
         "/api/v1/health/live",
         "/api/v1/health/ready",
@@ -298,6 +300,18 @@ def get_job_service(
     queue: RedisJobQueue = Depends(get_job_queue),
 ) -> JobService:
     return JobService(SQLAlchemyJobRepository(database.session_factory), queue)
+
+
+def get_metrics_service(
+    settings: Settings = Depends(get_settings),
+    database: Database = Depends(get_database),
+    queue: RedisJobQueue = Depends(get_job_queue),
+) -> MetricsService:
+    return MetricsService(
+        database.session_factory,
+        queue,
+        stuck_after_seconds=settings.stuck_job_seconds,
+    )
 
 
 def get_analysis_repository(
@@ -553,6 +567,16 @@ def list_customer_schemas(
     schema: CustomerSchema = Depends(get_customer_schema),
 ) -> list[CustomerSchema]:
     return [schema]
+
+
+@app.get("/api/v1/metrics/summary", response_model=MetricsSummary)
+def metrics_summary(service: MetricsService = Depends(get_metrics_service)) -> MetricsSummary:
+    return service.summary()
+
+
+@app.get("/metrics", response_class=PlainTextResponse, include_in_schema=False)
+def prometheus_metrics(service: MetricsService = Depends(get_metrics_service)) -> str:
+    return service.prometheus()
 
 
 @app.get("/api/v1/audit-events", response_model=list[AuditEvent])

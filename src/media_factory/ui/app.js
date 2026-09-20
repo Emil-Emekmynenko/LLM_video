@@ -104,6 +104,14 @@ async function loadHealth() {
   }
 }
 
+async function loadMetrics() {
+  try {
+    const metrics = await api("/api/v1/metrics/summary");
+    $("#stat-stuck").textContent = metrics.stuck_jobs.length;
+    $("#stat-stuck").title = metrics.stuck_jobs.map((job) => `${job.kind}: ${job.id}`).join("\n");
+  } catch (_) { $("#stat-stuck").textContent = "—"; }
+}
+
 async function loadPackages({ preserveSelection = true } = {}) {
   try {
     appState.packages = await api("/api/v1/packages");
@@ -117,6 +125,7 @@ async function loadPackages({ preserveSelection = true } = {}) {
     }));
     void assets;
     updateStats();
+    await loadMetrics();
     renderPackageList(query);
     if (!preserveSelection || !appState.packages.some((item) => item.id === appState.selectedId)) {
       appState.selectedId = location.hash.slice(1) || appState.packages[0]?.id || null;
@@ -863,7 +872,9 @@ function bindEvents() {
 
 bindEvents();
 loadHealth();
+loadMetrics();
 loadPrincipal();
 loadPackages({ preserveSelection: false });
 setInterval(loadHealth, 15000);
+setInterval(loadMetrics, 15000);
 setInterval(() => loadPackages(), 10000);

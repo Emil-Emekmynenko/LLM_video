@@ -74,6 +74,7 @@ class Settings(BaseSettings):
     operator_api_key: SecretStr = SecretStr("")
     qa_api_key: SecretStr = SecretStr("")
     admin_api_key: SecretStr = SecretStr("")
+    stuck_job_seconds: int = Field(default=1800, ge=60)
 
 
 @lru_cache(maxsize=1)

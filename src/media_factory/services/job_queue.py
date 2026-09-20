@@ -9,6 +9,8 @@ class JobQueue(Protocol):
 
     def is_available(self) -> bool: ...
 
+    def depth(self) -> int: ...
+
 
 class RedisJobQueue:
     def __init__(self, redis_url: str, queue_name: str) -> None:
@@ -30,6 +32,9 @@ class RedisJobQueue:
         except Exception:
             return False
 
+    def depth(self) -> int:
+        return len(self.queue)
+
 
 class InMemoryJobQueue:
     def __init__(self) -> None:
@@ -41,3 +46,5 @@ class InMemoryJobQueue:
     def is_available(self) -> bool:
         return True
 
+    def depth(self) -> int:
+        return len(self.enqueued)
