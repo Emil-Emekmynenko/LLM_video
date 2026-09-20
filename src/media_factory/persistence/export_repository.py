@@ -82,9 +82,7 @@ class SQLAlchemyExportRepository:
             result = cast(
                 CursorResult[Any],
                 session.execute(
-                    update(LocalExportRow)
-                    .where(LocalExportRow.id == export_id)
-                    .values(**values)
+                    update(LocalExportRow).where(LocalExportRow.id == export_id).values(**values)
                 ),
             )
             if result.rowcount != 1:

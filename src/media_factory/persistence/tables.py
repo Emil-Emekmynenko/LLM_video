@@ -137,9 +137,7 @@ class AnalysisRunRow(Base):
     provider_name: Mapped[str] = mapped_column(String(120), nullable=False)
     provider_version: Mapped[str] = mapped_column(String(80), nullable=False)
     prompt_version: Mapped[str] = mapped_column(String(80), nullable=False)
-    inference_parameters: Mapped[dict[str, Any]] = mapped_column(
-        JSON, nullable=False, default=dict
-    )
+    inference_parameters: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     proxy_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     processing_manifest: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
@@ -226,9 +224,7 @@ class MetadataVersionRow(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    package_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("packages.id"), nullable=False
-    )
+    package_id: Mapped[str] = mapped_column(String(36), ForeignKey("packages.id"), nullable=False)
     analysis_run_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("analysis_runs.id"), nullable=False
     )
@@ -257,9 +253,7 @@ class NarrationScriptRow(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    package_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("packages.id"), nullable=False
-    )
+    package_id: Mapped[str] = mapped_column(String(36), ForeignKey("packages.id"), nullable=False)
     metadata_version_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("metadata_versions.id"), nullable=False
     )
@@ -282,9 +276,7 @@ class TTSRunRow(Base):
     __table_args__ = (Index("ix_tts_runs_package_id", "package_id"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    package_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("packages.id"), nullable=False
-    )
+    package_id: Mapped[str] = mapped_column(String(36), ForeignKey("packages.id"), nullable=False)
     script_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("narration_scripts.id"), nullable=False
     )
@@ -305,12 +297,8 @@ class AudioTrackRow(Base):
     __table_args__ = (Index("ix_audio_tracks_package_id", "package_id"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    package_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("packages.id"), nullable=False
-    )
-    tts_run_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("tts_runs.id"), nullable=False
-    )
+    package_id: Mapped[str] = mapped_column(String(36), ForeignKey("packages.id"), nullable=False)
+    tts_run_id: Mapped[str] = mapped_column(String(36), ForeignKey("tts_runs.id"), nullable=False)
     script_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("narration_scripts.id"), nullable=False
     )
@@ -334,9 +322,7 @@ class AudioDecisionRow(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    package_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("packages.id"), nullable=False
-    )
+    package_id: Mapped[str] = mapped_column(String(36), ForeignKey("packages.id"), nullable=False)
     version: Mapped[int] = mapped_column(nullable=False)
     policy: Mapped[str] = mapped_column(String(20), nullable=False)
     audio_track_id: Mapped[str | None] = mapped_column(
@@ -353,9 +339,7 @@ class MasterBuildRow(Base):
     __table_args__ = (Index("ix_master_builds_package_id", "package_id"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    package_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("packages.id"), nullable=False
-    )
+    package_id: Mapped[str] = mapped_column(String(36), ForeignKey("packages.id"), nullable=False)
     source_asset_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("assets.id"), nullable=False
     )
@@ -384,9 +368,7 @@ class TranscriptionRunRow(Base):
     __table_args__ = (Index("ix_transcription_runs_package_id", "package_id"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    package_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("packages.id"), nullable=False
-    )
+    package_id: Mapped[str] = mapped_column(String(36), ForeignKey("packages.id"), nullable=False)
     master_build_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("master_builds.id"), nullable=False
     )
@@ -420,9 +402,7 @@ class PackageBuildRow(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    package_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("packages.id"), nullable=False
-    )
+    package_id: Mapped[str] = mapped_column(String(36), ForeignKey("packages.id"), nullable=False)
     version: Mapped[int] = mapped_column(nullable=False)
     state: Mapped[str] = mapped_column(String(20), nullable=False)
     master_build_id: Mapped[str] = mapped_column(
@@ -446,9 +426,7 @@ class PackageBuildRow(Base):
     validation_issues: Mapped[list[dict[str, Any]]] = mapped_column(
         JSON, nullable=False, default=list
     )
-    build_parameters: Mapped[dict[str, Any]] = mapped_column(
-        JSON, nullable=False, default=dict
-    )
+    build_parameters: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -465,9 +443,7 @@ class QAReviewRow(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    package_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("packages.id"), nullable=False
-    )
+    package_id: Mapped[str] = mapped_column(String(36), ForeignKey("packages.id"), nullable=False)
     package_build_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("package_builds.id"), nullable=False
     )
@@ -485,9 +461,7 @@ class LocalExportRow(Base):
     __table_args__ = (Index("ix_local_exports_package_build_id", "package_build_id"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    package_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("packages.id"), nullable=False
-    )
+    package_id: Mapped[str] = mapped_column(String(36), ForeignKey("packages.id"), nullable=False)
     package_build_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("package_builds.id"), nullable=False
     )
@@ -509,17 +483,13 @@ class LocalExportRow(Base):
 class DeliveryAttemptRow(Base):
     __tablename__ = "delivery_attempts"
     __table_args__ = (
-        UniqueConstraint(
-            "package_id", "idempotency_key", name="uq_delivery_attempt_idempotency"
-        ),
+        UniqueConstraint("package_id", "idempotency_key", name="uq_delivery_attempt_idempotency"),
         UniqueConstraint("package_build_id", name="uq_delivery_attempt_package_build"),
         Index("ix_delivery_attempts_package_id", "package_id"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    package_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("packages.id"), nullable=False
-    )
+    package_id: Mapped[str] = mapped_column(String(36), ForeignKey("packages.id"), nullable=False)
     package_build_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("package_builds.id"), nullable=False
     )
@@ -556,9 +526,7 @@ class DeliveryAttemptRow(Base):
 class UploadedObjectRow(Base):
     __tablename__ = "uploaded_objects"
     __table_args__ = (
-        UniqueConstraint(
-            "delivery_attempt_id", "remote_key", name="uq_uploaded_object_remote_key"
-        ),
+        UniqueConstraint("delivery_attempt_id", "remote_key", name="uq_uploaded_object_remote_key"),
         Index("ix_uploaded_objects_delivery_attempt_id", "delivery_attempt_id"),
     )
 

@@ -51,10 +51,13 @@ def test_repository_never_persists_plain_session_token(tmp_path: Path) -> None:
         row = session.scalar(select(UploadCheckpointRow))
         assert row is not None
         assert "sensitive-session-token" not in row.encrypted_session_token
-    assert repository.get_checkpoint(
-        delivery_attempt_id="delivery-1",
-        remote_key="prefix/video.mp4",
-        provider="s3",
-        source_size_bytes=2048,
-        source_sha256="a" * 64,
-    ) == checkpoint
+    assert (
+        repository.get_checkpoint(
+            delivery_attempt_id="delivery-1",
+            remote_key="prefix/video.mp4",
+            provider="s3",
+            source_size_bytes=2048,
+            source_sha256="a" * 64,
+        )
+        == checkpoint
+    )

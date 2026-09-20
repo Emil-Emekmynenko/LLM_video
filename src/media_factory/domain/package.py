@@ -21,4 +21,3 @@ class Package(BaseModel):
 class PackageTransitionRequest(BaseModel):
     target: PackageState
     expected_version: int = Field(ge=1)
-

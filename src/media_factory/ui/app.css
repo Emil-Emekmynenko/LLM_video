@@ -122,6 +122,26 @@ dt { color: var(--muted); } dd { margin: 0; text-align: right; overflow-wrap: an
 .job-meta { display: flex; justify-content: space-between; color: var(--muted); margin-top: 9px; font-size: 11px; }
 .error-copy { color: var(--danger); font-size: 12px; line-height: 1.5; margin-top: 12px; }
 .history-card { margin-top: 14px; }
+.result-card { margin-top: 14px; }
+.result-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+.result-section { min-width: 0; }
+.result-section + .result-section { padding-left: 28px; border-left: 1px solid var(--line); }
+.result-section h4 { margin: 0; font-size: 17px; }
+.result-provider { margin: 7px 0 18px; color: var(--accent); font: 700 10px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.result-title { margin: 0 0 7px; font-size: 15px; }
+.result-copy, .transcript-copy { margin: 0 0 16px; color: #c7ccd2; font-size: 13px; line-height: 1.65; white-space: pre-wrap; }
+.recognition-list { display: grid; gap: 1px; overflow: hidden; border: 1px solid var(--line); border-radius: 11px; }
+.recognition-row { display: grid; grid-template-columns: 82px 1fr; gap: 11px; padding: 10px 11px; background: rgba(255, 255, 255, .02); }
+.recognition-row + .recognition-row { border-top: 1px solid var(--line); }
+.recognition-row time { color: var(--accent); font: 700 10px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.recognition-row strong, .recognition-row span { display: block; }
+.recognition-row strong { font-size: 12px; }
+.recognition-row span { margin-top: 4px; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.transcript-copy { max-height: 250px; overflow: auto; }
+.transcript-details summary { color: var(--muted); cursor: pointer; font-size: 11px; }
+.transcript-segment { display: grid; grid-template-columns: 82px 1fr; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 11px; line-height: 1.45; }
+.transcript-segment:first-of-type { margin-top: 10px; }
+.transcript-segment time { color: var(--accent); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .muted { color: var(--muted); font-size: 11px; }
 .history { display: grid; }
 .history-row { display: grid; grid-template-columns: 8px minmax(130px, .9fr) 1fr auto; gap: 13px; align-items: center; padding: 12px 0; border-top: 1px solid var(--line); font-size: 12px; }
@@ -213,6 +233,8 @@ dt { color: var(--muted); } dd { margin: 0; text-align: right; overflow-wrap: an
   .detail-actions { margin-top: 20px; justify-content: flex-start; }
   .pipeline-step { font-size: 8px; }
   .detail-grid { grid-template-columns: 1fr; }
+  .result-grid { grid-template-columns: 1fr; }
+  .result-section + .result-section { padding: 22px 0 0; border-left: 0; border-top: 1px solid var(--line); }
   .history-row { grid-template-columns: 7px 1fr auto; }
   .history-error { grid-column: 2 / -1; }
   .review-dialog { width: calc(100% - 16px); max-height: calc(100vh - 16px); }

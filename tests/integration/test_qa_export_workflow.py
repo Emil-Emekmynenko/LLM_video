@@ -69,7 +69,9 @@ class MemoryDeliveryProvider:
         return self.objects[key]
 
 
-def prepare_package_build(tmp_path: Path) -> tuple[
+def prepare_package_build(
+    tmp_path: Path,
+) -> tuple[
     Database,
     SQLAlchemyPackageRepository,
     SQLAlchemyPackageBuildRepository,
@@ -314,6 +316,45 @@ def test_delivery_uploads_media_first_and_verifies_complete_package(tmp_path: Pa
     assert completed.package_complete_at is not None
     assert provider.uploaded_keys[0].endswith(".mp4")
     assert all(item.verified_at is not None for item in repository.list_objects(delivery.id))
+
+
+def test_completed_delivery_can_still_be_exported(tmp_path: Path) -> None:
+    database, packages, builds, reviews, build = prepare_package_build(tmp_path)
+    QAService(packages=packages, builds=builds, reviews=reviews).review(
+        build.package_id,
+        QAReviewRequest(
+            package_build_id=build.id,
+            approved=True,
+            reviewer="qa@example.test",
+        ),
+    )
+    delivery_service = DeliveryService(
+        packages=packages,
+        builds=builds,
+        reviews=reviews,
+        deliveries=SQLAlchemyDeliveryRepository(database.session_factory),
+        provider=MemoryDeliveryProvider(),
+    )
+    delivery = delivery_service.create(
+        build.package_id,
+        DeliveryCreateRequest(package_build_id=build.id),
+        idempotency_key="delivery-before-export",
+    )
+    delivery_service.deliver(delivery.id)
+    assert packages.get(build.package_id).state is PackageState.COMPLETE
+
+    exported = LocalExportService(
+        packages=packages,
+        builds=builds,
+        reviews=reviews,
+        exports=SQLAlchemyExportRepository(database.session_factory),
+        export_dir=tmp_path / "exports",
+        chunk_size=64 * 1024,
+    ).export(build.package_id, build.id)
+
+    assert exported.state is ExportState.SUCCEEDED
+    assert exported.archive_path is not None
+    assert Path(exported.archive_path).is_file()
 
 
 def test_delivery_retry_resumes_after_media_without_reuploading_it(tmp_path: Path) -> None:

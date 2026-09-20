@@ -41,4 +41,3 @@ def test_asset_survives_repository_recreation(tmp_path: Path) -> None:
     assert restored.inspection is not None
     assert restored.inspection.duration == 5.5
     assert restored.inspection.video_streams[0].width == 1920
-

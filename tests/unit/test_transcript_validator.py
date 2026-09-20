@@ -37,7 +37,4 @@ def test_out_of_order_word_is_rejected() -> None:
         ]
     )
 
-    assert [issue.code for issue in validate_transcript(transcript)] == [
-        "invalid_word_timing"
-    ]
-
+    assert [issue.code for issue in validate_transcript(transcript)] == ["invalid_word_timing"]

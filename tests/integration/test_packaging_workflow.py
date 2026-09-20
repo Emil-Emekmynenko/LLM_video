@@ -238,9 +238,7 @@ def test_package_build_creates_validated_versioned_sidecars(tmp_path: Path) -> N
         f"{build.base_name}_metadata.json",
         f"{build.base_name}_manifest.json",
     }
-    metadata_payload = json.loads(
-        (output_dir / f"{build.base_name}_metadata.json").read_text()
-    )
+    metadata_payload = json.loads((output_dir / f"{build.base_name}_metadata.json").read_text())
     assert list(metadata_payload) == [
         "Title",
         "Description",
@@ -253,9 +251,7 @@ def test_package_build_creates_validated_versioned_sidecars(tmp_path: Path) -> N
     ]
     manifest = json.loads(Path(build.manifest_path).read_text())
     assert build.base_name == "Repairs_And_DIY_Repairing_a_table"
-    assert manifest["customer_schema_sha256"] == build.build_parameters[
-        "customer_schema_sha256"
-    ]
+    assert manifest["customer_schema_sha256"] == build.build_parameters["customer_schema_sha256"]
     assert manifest["master_sha256"] == master_sha256
     assert manifest["transcript_master_sha256"] == master_sha256
     assert manifest["validation"] == []

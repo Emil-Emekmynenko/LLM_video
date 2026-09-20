@@ -152,9 +152,7 @@ class SQLAlchemyTranscriptionRepository:
             language_probability=row.language_probability,
             text=row.text,
             transcript=(
-                Transcript.model_validate(row.transcript)
-                if row.transcript is not None
-                else None
+                Transcript.model_validate(row.transcript) if row.transcript is not None else None
             ),
             validation_issues=[
                 ValidationIssue.model_validate(issue) for issue in row.validation_issues

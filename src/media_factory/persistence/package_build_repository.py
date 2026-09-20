@@ -34,14 +34,17 @@ class SQLAlchemyPackageBuildRepository:
         build_parameters: dict[str, Any],
     ) -> PackageBuild:
         with self.session_factory.begin() as session:
-            version = int(
-                session.scalar(
-                    select(func.max(PackageBuildRow.version)).where(
-                        PackageBuildRow.package_id == package_id
+            version = (
+                int(
+                    session.scalar(
+                        select(func.max(PackageBuildRow.version)).where(
+                            PackageBuildRow.package_id == package_id
+                        )
                     )
+                    or 0
                 )
-                or 0
-            ) + 1
+                + 1
+            )
             row = PackageBuildRow(
                 id=str(uuid4()),
                 package_id=package_id,
@@ -137,9 +140,7 @@ class SQLAlchemyPackageBuildRepository:
             result = cast(
                 CursorResult[Any],
                 session.execute(
-                    update(PackageBuildRow)
-                    .where(PackageBuildRow.id == build_id)
-                    .values(**values)
+                    update(PackageBuildRow).where(PackageBuildRow.id == build_id).values(**values)
                 ),
             )
             if result.rowcount != 1:

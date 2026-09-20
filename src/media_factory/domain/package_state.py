@@ -43,21 +43,15 @@ ALLOWED_TRANSITIONS: dict[PackageState, frozenset[PackageState]] = {
             PackageState.READY_FOR_ANALYSIS,
         }
     ),
-    PackageState.INSPECTION_FAILED: frozenset(
-        {PackageState.INSPECTING, PackageState.CANCELLED}
-    ),
+    PackageState.INSPECTION_FAILED: frozenset({PackageState.INSPECTING, PackageState.CANCELLED}),
     PackageState.DUPLICATE_REVIEW: frozenset(
         {PackageState.READY_FOR_ANALYSIS, PackageState.CANCELLED}
     ),
-    PackageState.READY_FOR_ANALYSIS: frozenset(
-        {PackageState.ANALYZING, PackageState.CANCELLED}
-    ),
+    PackageState.READY_FOR_ANALYSIS: frozenset({PackageState.ANALYZING, PackageState.CANCELLED}),
     PackageState.ANALYZING: frozenset(
         {PackageState.ANALYSIS_FAILED, PackageState.AWAITING_METADATA_REVIEW}
     ),
-    PackageState.ANALYSIS_FAILED: frozenset(
-        {PackageState.ANALYZING, PackageState.CANCELLED}
-    ),
+    PackageState.ANALYSIS_FAILED: frozenset({PackageState.ANALYZING, PackageState.CANCELLED}),
     PackageState.AWAITING_METADATA_REVIEW: frozenset(
         {
             PackageState.AWAITING_NARRATION_REVIEW,
@@ -75,9 +69,7 @@ ALLOWED_TRANSITIONS: dict[PackageState, frozenset[PackageState]] = {
     PackageState.MASTER_BUILDING: frozenset(
         {PackageState.MASTER_FAILED, PackageState.MASTER_READY}
     ),
-    PackageState.MASTER_FAILED: frozenset(
-        {PackageState.MASTER_BUILDING, PackageState.CANCELLED}
-    ),
+    PackageState.MASTER_FAILED: frozenset({PackageState.MASTER_BUILDING, PackageState.CANCELLED}),
     PackageState.MASTER_READY: frozenset({PackageState.TRANSCRIBING}),
     PackageState.TRANSCRIBING: frozenset(
         {PackageState.TRANSCRIPTION_FAILED, PackageState.ALIGNING}
@@ -89,15 +81,9 @@ ALLOWED_TRANSITIONS: dict[PackageState, frozenset[PackageState]] = {
     PackageState.ALIGNMENT_FAILED: frozenset(
         {PackageState.TRANSCRIBING, PackageState.ALIGNING, PackageState.CANCELLED}
     ),
-    PackageState.PACKAGING: frozenset(
-        {PackageState.VALIDATION_FAILED, PackageState.AWAITING_QA}
-    ),
-    PackageState.VALIDATION_FAILED: frozenset(
-        {PackageState.PACKAGING, PackageState.CANCELLED}
-    ),
-    PackageState.AWAITING_QA: frozenset(
-        {PackageState.VALIDATED, PackageState.VALIDATION_FAILED}
-    ),
+    PackageState.PACKAGING: frozenset({PackageState.VALIDATION_FAILED, PackageState.AWAITING_QA}),
+    PackageState.VALIDATION_FAILED: frozenset({PackageState.PACKAGING, PackageState.CANCELLED}),
+    PackageState.AWAITING_QA: frozenset({PackageState.VALIDATED, PackageState.VALIDATION_FAILED}),
     PackageState.VALIDATED: frozenset({PackageState.DELIVERY_QUEUED}),
     PackageState.DELIVERY_QUEUED: frozenset(
         {PackageState.UPLOADING_MEDIA, PackageState.DELIVERY_FAILED}
@@ -111,9 +97,7 @@ ALLOWED_TRANSITIONS: dict[PackageState, frozenset[PackageState]] = {
     PackageState.VERIFYING_DELIVERY: frozenset(
         {PackageState.COMPLETE, PackageState.DELIVERY_FAILED}
     ),
-    PackageState.DELIVERY_FAILED: frozenset(
-        {PackageState.DELIVERY_QUEUED, PackageState.CANCELLED}
-    ),
+    PackageState.DELIVERY_FAILED: frozenset({PackageState.DELIVERY_QUEUED, PackageState.CANCELLED}),
     PackageState.COMPLETE: frozenset(),
     PackageState.CANCELLED: frozenset(),
 }

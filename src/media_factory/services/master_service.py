@@ -98,11 +98,7 @@ class MasterService:
             source_sha256=source.sha256,
             audio_decision_id=decision.id,
         )
-        destination = (
-            self.master_dir
-            / package.id
-            / f"{build.id}.{self.container_extension}"
-        )
+        destination = self.master_dir / package.id / f"{build.id}.{self.container_extension}"
         ffmpeg_command: list[str] = []
         try:
             ffmpeg_command = self.assembler.build(
@@ -175,8 +171,5 @@ class MasterService:
             raise MasterValidationError("preserve policy changed an audio codec")
         if policy is AudioPolicy.REPLACE and master_audio_count != 1:
             raise MasterValidationError("replace policy must produce one audio stream")
-        if (
-            policy is AudioPolicy.ADDITIONAL
-            and master_audio_count != source_audio_count + 1
-        ):
+        if policy is AudioPolicy.ADDITIONAL and master_audio_count != source_audio_count + 1:
             raise MasterValidationError("additional policy produced the wrong audio count")

@@ -88,6 +88,14 @@
               </article>
             </div>
 
+            <article class="info-card result-card" id="result-card" hidden>
+              <div class="card-title"><h3>Результат распознавания</h3><span id="result-badge" class="badge">—</span></div>
+              <div class="result-grid">
+                <section class="result-section" id="visual-result"></section>
+                <section class="result-section" id="transcript-result"></section>
+              </div>
+            </article>
+
             <article class="info-card history-card">
               <div class="card-title"><h3>История обработки</h3><span id="history-count" class="muted"></span></div>
               <div class="history" id="history"></div>
@@ -112,6 +120,6 @@
     </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/ui/app.js" defer></script>
+    <script src="/ui/app.js?v=2" defer></script>
   </body>
 </html>

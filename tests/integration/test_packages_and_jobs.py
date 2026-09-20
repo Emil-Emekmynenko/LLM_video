@@ -45,9 +45,7 @@ def test_package_transition_uses_optimistic_locking(tmp_path: Path) -> None:
 
     assert transitioned.state is PackageState.INSPECTING
     assert transitioned.version == 2
-    audit = SQLAlchemyAuditRepository(database.session_factory).list_events(
-        package_id=package.id
-    )
+    audit = SQLAlchemyAuditRepository(database.session_factory).list_events(package_id=package.id)
     assert len(audit) == 1
     assert audit[0].action == "package.state_changed"
     assert audit[0].details == {"from": "uploaded", "to": "inspecting"}
@@ -132,6 +130,7 @@ def test_package_and_job_api_flow(tmp_path: Path) -> None:
         packages = client.get("/api/v1/packages")
         asset_response = client.get(f"/api/v1/assets/{asset.id}")
         jobs = client.get(f"/api/v1/packages/{package_id}/jobs")
+        reprocessed = client.post(f"/api/v1/packages/{package_id}/reprocess")
     finally:
         app.dependency_overrides.clear()
 
@@ -144,3 +143,7 @@ def test_package_and_job_api_flow(tmp_path: Path) -> None:
     assert [item["id"] for item in packages.json()] == [package_id]
     assert asset_response.json()["original_name"] == "video.mp4"
     assert [item["id"] for item in jobs.json()] == [job.json()["id"]]
+    assert reprocessed.status_code == 201
+    assert reprocessed.json()["id"] != package_id
+    assert reprocessed.json()["source_asset_id"] == asset.id
+    assert reprocessed.json()["state"] == "uploaded"

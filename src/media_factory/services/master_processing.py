@@ -44,9 +44,7 @@ class FFmpegMasterAssembler:
         elif policy is AudioPolicy.REPLACE:
             command.extend(["-map", "1:a:0", "-c:v", "copy", "-c:a", "aac"])
         else:
-            command.extend(
-                ["-map", "0:a?", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac"]
-            )
+            command.extend(["-map", "0:a?", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac"])
         command.extend(
             [
                 "-t",

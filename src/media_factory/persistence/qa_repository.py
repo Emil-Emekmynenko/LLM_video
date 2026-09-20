@@ -64,9 +64,7 @@ class SQLAlchemyQARepository:
                 if package_result.rowcount != 1:
                     if session.get(PackageRow, package_id) is None:
                         raise EntityNotFoundError("package", package_id)
-                    raise VersionConflictError(
-                        "package", package_id, expected_package_version
-                    )
+                    raise VersionConflictError("package", package_id, expected_package_version)
                 build_result = cast(
                     CursorResult[Any],
                     session.execute(

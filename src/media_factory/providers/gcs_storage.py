@@ -127,9 +127,7 @@ class GCSObjectStorageProvider:
             raise
 
     def _start_session(self, key: str, expected_size: int, expected_sha256: str) -> str:
-        query = urlencode(
-            {"uploadType": "resumable", "name": key, "ifGenerationMatch": "0"}
-        )
+        query = urlencode({"uploadType": "resumable", "name": key, "ifGenerationMatch": "0"})
         bucket = quote(self.bucket_name, safe="")
         url = f"{self.api_base_url}/upload/storage/v1/b/{bucket}/o?{query}"
         response = self.transport.request(
@@ -191,9 +189,7 @@ class GCSObjectStorageProvider:
         if callback is not None:
             callback(TransferCheckpoint(session_uri, next_offset, []))
 
-    def _verified_remote(
-        self, key: str, expected_size: int, expected_sha256: str
-    ) -> RemoteObject:
+    def _verified_remote(self, key: str, expected_size: int, expected_sha256: str) -> RemoteObject:
         remote = self.inspect(key)
         if remote.size_bytes != expected_size or remote.sha256 != expected_sha256:
             raise RemoteObjectInvalid(f"GCS object mismatch after upload: {key}")

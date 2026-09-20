@@ -39,9 +39,7 @@ class ObservedEventProvider:
     name = "test-vlm"
     version = "test-revision"
     prompt_version = "test-prompt"
-    inference_parameters: dict[str, str | int | float | bool | None] = {
-        "temperature": 0
-    }
+    inference_parameters: dict[str, str | int | float | bool | None] = {"temperature": 0}
 
     def analyze_clip(self, clip_path: Path, interval: ClipInterval) -> ClipAnalysis:
         del clip_path, interval

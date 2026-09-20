@@ -75,9 +75,7 @@ class QAService:
         final_manifest_sha256 = sha256_file(manifest_path)
         try:
             target_state = (
-                PackageState.VALIDATED
-                if request.approved
-                else PackageState.VALIDATION_FAILED
+                PackageState.VALIDATED if request.approved else PackageState.VALIDATION_FAILED
             )
             ensure_transition_allowed(package.state, target_state)
             return self.reviews.create_and_finalize(

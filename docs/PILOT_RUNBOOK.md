@@ -6,17 +6,23 @@
 доступны; активная customer schema загружается; один тестовый MP4 проходит
 путь `uploaded → complete`; QA выполняется отдельным ключом; ZIP скачивается;
 доставка содержит master, transcript, metadata и manifest с совпадающими
-SHA-256. Проверка реальных VLM/ASR/TTS выполняется отдельно от deterministic
-fake-провайдеров.
+SHA-256. Для рабочего AI-пилота analysis run должен быть создан Qwen3-VL, а
+transcription run — faster-whisper; deterministic fake-провайдеры допустимы
+только для тестов pipeline.
 
 ## 2. Подготовка
 
 1. Скопировать `.env.example` в `.env` и не коммитить полученный файл.
-2. Для локальной демонстрации оставить fake providers и filesystem delivery.
+2. Установить Ollama, выполнить `ollama pull qwen3-vl:4b-instruct`, затем
+   `ollama create qwen3-vl:4b-instruct-8k -f config/ollama-qwen3-vl.Modelfile` и
+   настроить Qwen по примеру из README. На сервере с NVIDIA можно оставить
+   video-режим и vLLM.
 3. Для внешнего пилота включить RBAC, задать разные operator/QA/admin keys,
    выключить fake VLM/ASR/TTS и настроить Qwen, faster-whisper и Piper.
-4. Установить FFmpeg/ffprobe 9.x либо использовать контейнер из репозитория.
-5. Модель Piper `.onnx` и соседний `.onnx.json` хранить вне Git; путь передать
+4. Включить `faster-whisper`; при Docker-запуске веса сохраняются в volume
+   `huggingface-cache`.
+5. Установить FFmpeg/ffprobe 9.x либо использовать контейнер из репозитория.
+6. Модель Piper `.onnx` и соседний `.onnx.json` хранить вне Git; путь передать
    через `MEDIA_FACTORY_PIPER_MODEL_PATH`.
 
 Проверка окружения:
@@ -60,6 +66,9 @@ API сам выполняет `alembic upgrade head` перед стартом. 
 9. Убедиться, что статус `complete`, `package_complete_at` заполнен, у всех
    uploaded objects есть `verified_at`, а `/metrics` не показывает stuck jobs.
 10. Проверить аудит карточки: ручные правки, approvals и переходы состояния.
+11. В итоговой карточке проверить provider/model, описание действий, полный
+    текст речи, сегменты и word-level таймкоды; бейдж не должен показывать
+    «Тестовые данные».
 
 Автоматическая приёмка:
 

@@ -22,6 +22,11 @@ class PackageService:
     def list_packages(self) -> list[Package]:
         return self.repository.list_packages()
 
+    def reprocess(self, package_id: str) -> Package:
+        """Start a new immutable processing attempt for the same source asset."""
+        current = self.repository.get(package_id)
+        return self.repository.create(current.source_asset_id)
+
     def transition(
         self,
         package_id: str,

@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     auto_create_schema: bool = True
     redis_url: str = "redis://localhost:6379/0"
     queue_name: str = "media-tasks"
+    job_timeout_seconds: int = Field(default=1800, ge=60)
     proxy_dir: Path = Path("data/proxies")
     clip_dir: Path = Path("data/clips")
     max_clip_duration: float = 15.0
@@ -30,12 +31,15 @@ class Settings(BaseSettings):
     allow_fake_vlm: bool = True
     qwen_base_url: str = "http://localhost:8001/v1"
     qwen_api_key: SecretStr = SecretStr("EMPTY")
-    qwen_model: str = "Qwen/Qwen3-VL-8B-Instruct"
-    qwen_model_revision: str = "e0a319f4d147b3916275a053b0583ca82f351e90"
+    qwen_model: str = "qwen3-vl:4b-instruct-8k"
+    qwen_model_revision: str = "ee4b975b58c1+ctx8192"
     qwen_timeout_seconds: float = Field(default=600.0, gt=0)
     qwen_max_retries: int = Field(default=2, ge=0, le=5)
     qwen_temperature: float = Field(default=0.1, ge=0, le=2)
-    qwen_max_tokens: int = Field(default=2048, gt=0)
+    qwen_max_tokens: int = Field(default=1024, gt=0)
+    qwen_media_mode: str = "frames"
+    qwen_frame_count: int = Field(default=3, ge=1, le=16)
+    qwen_frame_max_width: int = Field(default=640, ge=320, le=2048)
     narration_dir: Path = Path("data/narration")
     tts_provider: str = "fake"
     allow_fake_tts: bool = True

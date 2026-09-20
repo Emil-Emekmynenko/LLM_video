@@ -109,9 +109,7 @@ class MetadataService:
             category = self._category_for(events)
         elif clips:
             title = "Video Activity"
-            description = " ".join(
-                dict.fromkeys(clip.result.summary for clip in clips[:3])
-            )
+            description = " ".join(dict.fromkeys(clip.result.summary for clip in clips[:3]))
             category = "Other"
         else:
             raise MetadataWorkflowError("approved analysis contains no observations")
@@ -138,17 +136,13 @@ class MetadataService:
             first = events[0]
             proposed[round(first.start, 3)] = first.action.replace("_", " ").title()
         return [
-            MetadataChapter(start=start, title=title)
-            for start, title in sorted(proposed.items())
+            MetadataChapter(start=start, title=title) for start, title in sorted(proposed.items())
         ]
 
     @staticmethod
     def _category_for(events: list[TimelineEvent]) -> str:
         text = " ".join(
-            [
-                event.action + " " + " ".join(event.objects)
-                for event in events
-            ]
+            [event.action + " " + " ".join(event.objects) for event in events]
         ).casefold()
         mappings = (
             ("Repairs_And_DIY", ("repair", "screwdriver", "hammer", "drill", "wood")),

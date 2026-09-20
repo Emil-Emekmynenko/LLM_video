@@ -1,2 +1,1 @@
 """Database persistence adapters."""
-

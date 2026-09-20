@@ -71,9 +71,7 @@ class SQLAlchemyJobRepository:
 
     def list_for_package(self, package_id: str) -> list[Job]:
         statement: Select[tuple[JobRow]] = (
-            select(JobRow)
-            .where(JobRow.package_id == package_id)
-            .order_by(JobRow.created_at.desc())
+            select(JobRow).where(JobRow.package_id == package_id).order_by(JobRow.created_at.desc())
         )
         with self.session_factory() as session:
             return [self._to_domain(row) for row in session.scalars(statement)]

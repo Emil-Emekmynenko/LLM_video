@@ -45,8 +45,8 @@ class LocalExportService:
 
     def validate_request(self, package_id: str, package_build_id: str) -> None:
         package = self.packages.get(package_id)
-        if package.state is not PackageState.VALIDATED:
-            raise ExportWorkflowError("package must be validated before export")
+        if package.state not in {PackageState.VALIDATED, PackageState.COMPLETE}:
+            raise ExportWorkflowError("package must be validated or complete before export")
         build = self.builds.get(package_build_id)
         if build.package_id != package_id or build.state is not PackageBuildState.SUCCEEDED:
             raise ExportWorkflowError("package build is not exportable")
@@ -79,9 +79,7 @@ class LocalExportService:
             try:
                 os.link(temporary, destination)
             except FileExistsError as exc:
-                raise ExportAlreadyExists(
-                    f"export already exists: {archive_name}"
-                ) from exc
+                raise ExportAlreadyExists(f"export already exists: {archive_name}") from exc
             temporary.unlink()
             return self.exports.succeed(
                 export.id,
@@ -140,9 +138,10 @@ class LocalExportService:
                 info = ZipInfo(archive_name, date_time=_zip_timestamp(build.created_at))
                 info.compress_type = ZIP_STORED
                 info.external_attr = 0o100644 << 16
-                with source.open("rb") as source_file, archive.open(
-                    info, mode="w", force_zip64=True
-                ) as archive_file:
+                with (
+                    source.open("rb") as source_file,
+                    archive.open(info, mode="w", force_zip64=True) as archive_file,
+                ):
                     shutil.copyfileobj(source_file, archive_file, length=self.chunk_size)
 
 

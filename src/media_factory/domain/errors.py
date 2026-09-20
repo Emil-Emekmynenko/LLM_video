@@ -7,9 +7,7 @@ class EntityNotFoundError(LookupError):
 
 class VersionConflictError(RuntimeError):
     def __init__(self, entity: str, entity_id: str, expected_version: int) -> None:
-        super().__init__(
-            f"{entity} {entity_id} no longer has expected version {expected_version}"
-        )
+        super().__init__(f"{entity} {entity_id} no longer has expected version {expected_version}")
         self.entity = entity
         self.entity_id = entity_id
         self.expected_version = expected_version

@@ -117,9 +117,7 @@ class SQLAlchemyMasterRepository:
             result = cast(
                 CursorResult[Any],
                 session.execute(
-                    update(MasterBuildRow)
-                    .where(MasterBuildRow.id == build_id)
-                    .values(**values)
+                    update(MasterBuildRow).where(MasterBuildRow.id == build_id).values(**values)
                 ),
             )
             if result.rowcount != 1:

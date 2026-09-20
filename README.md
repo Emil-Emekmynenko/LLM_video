@@ -38,6 +38,9 @@
   master в сборку, включая ручной перезапуск восстановимых стадий.
 - финальная QA-карточка вычисленных метаданных и файлов, reject/approve,
   локальный ZIP, доставка, контроль статуса и безопасный retry в UI.
+- итоговая карточка распознанных действий и транскрипции с таймкодами,
+  явной маркировкой реальных или тестовых провайдеров и новым неизменяемым
+  прогоном для того же исходника.
 - неизменяемый аудит ручных запросов и переходов состояния, correlation ID,
   структурированные HTTP-логи и опциональный RBAC по API-ключам.
 
@@ -45,6 +48,7 @@
 
 - Python 3.12+;
 - FFmpeg/ffprobe для реальной инспекции видео;
+- Ollama 0.12.7+ и Qwen3-VL для локального визуального анализа;
 - optional extra `asr` для локального faster-whisper;
 - SQLite для локального режима или PostgreSQL для production.
 
@@ -96,24 +100,36 @@ curl -X POST http://127.0.0.1:8000/api/v1/packages/<package-id>/jobs \
 
 ## Локальный Qwen3-VL
 
-Модель запускается отдельным GPU-процессом, например через vLLM:
+На Apple Silicon рекомендуемый MVP-профиль — Ollama и квантованная Qwen3-VL 4B:
 
 ```bash
-vllm serve Qwen/Qwen3-VL-8B-Instruct \
-  --revision e0a319f4d147b3916275a053b0583ca82f351e90 \
-  --port 8001 \
-  --max-model-len 32768
+ollama pull qwen3-vl:4b-instruct
+ollama create qwen3-vl:4b-instruct-8k -f config/ollama-qwen3-vl.Modelfile
 ```
 
-В `.env` переключите worker с тестового провайдера на реальный:
+Производная модель `-8k` использует те же веса и только увеличивает
+контекст до 8192 токенов, чтобы JSON-ответ помещался вместе с тремя
+кадрами. Дополнительная копия весов не создаётся.
+
+В `.env` переключите worker с тестового провайдера на реальный. При запуске
+через Docker используйте `host.docker.internal`; без Docker — `localhost`:
 
 ```dotenv
 MEDIA_FACTORY_VLM_PROVIDER=qwen
 MEDIA_FACTORY_ALLOW_FAKE_VLM=false
-MEDIA_FACTORY_QWEN_BASE_URL=http://localhost:8001/v1
-MEDIA_FACTORY_QWEN_MODEL=Qwen/Qwen3-VL-8B-Instruct
-MEDIA_FACTORY_QWEN_MODEL_REVISION=e0a319f4d147b3916275a053b0583ca82f351e90
+MEDIA_FACTORY_QWEN_BASE_URL=http://host.docker.internal:11434/v1
+MEDIA_FACTORY_QWEN_MODEL=qwen3-vl:4b-instruct-8k
+MEDIA_FACTORY_QWEN_MODEL_REVISION=ee4b975b58c1+ctx8192
+MEDIA_FACTORY_QWEN_MAX_TOKENS=1024
+MEDIA_FACTORY_QWEN_MEDIA_MODE=frames
+MEDIA_FACTORY_QWEN_FRAME_COUNT=3
+MEDIA_FACTORY_QWEN_FRAME_MAX_WIDTH=640
 ```
+
+В режиме `frames` worker равномерно извлекает JPEG-кадры из каждого клипа и
+передаёт их модели в хронологическом порядке. Это совместимо с локальным
+OpenAI API Ollama и не меняет исходное или master-видео. Режим `video` оставлен
+для серверов, которые принимают `video_url`, например отдельного vLLM-процесса.
 
 После задания `analyze_video` клипы доступны по
 `GET /api/v1/analysis-runs/{run_id}/clips`, а объединённые события — по
@@ -194,6 +210,16 @@ decode-pass, после чего вычисляется SHA-256. Только у
 Параметры модели задаются переменными `MEDIA_FACTORY_FASTER_WHISPER_*`. Режим
 `fake` предназначен только для разработки. Веса модели загружаются или монтируются
 во время выполнения и не должны добавляться в Git.
+
+В контейнерном профиле Hugging Face cache подключён отдельным volume, поэтому
+веса ASR не скачиваются заново после пересборки worker.
+
+## Повторная обработка
+
+Кнопка «Обработать заново» и
+`POST /api/v1/packages/{package_id}/reprocess` создают новый комплект для того
+же исходного asset. Старые analysis runs, транскрипты, approvals, сборки и
+экспорты остаются неизменными; новый прогон начинает pipeline с `uploaded`.
 
 ## Сборка и автоматическая приёмка комплекта
 

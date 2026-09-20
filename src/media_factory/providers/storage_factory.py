@@ -15,9 +15,7 @@ def build_checkpoint_cipher(settings: Settings) -> CheckpointCipher | None:
         return None
     secret = settings.delivery_checkpoint_secret.get_secret_value()
     if not secret:
-        raise RuntimeError(
-            "cloud delivery requires MEDIA_FACTORY_DELIVERY_CHECKPOINT_SECRET"
-        )
+        raise RuntimeError("cloud delivery requires MEDIA_FACTORY_DELIVERY_CHECKPOINT_SECRET")
     return CheckpointCipher(secret)
 
 

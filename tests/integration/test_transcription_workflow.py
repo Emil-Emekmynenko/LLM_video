@@ -64,7 +64,9 @@ class StubASRProvider:
         )
 
 
-def prepare_master(tmp_path: Path) -> tuple[
+def prepare_master(
+    tmp_path: Path,
+) -> tuple[
     SQLAlchemyPackageRepository,
     SQLAlchemyMasterRepository,
     SQLAlchemyTranscriptionRepository,

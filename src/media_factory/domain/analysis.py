@@ -1,7 +1,10 @@
 from datetime import datetime
 from enum import StrEnum
+from typing import Annotated
 
 from pydantic import BaseModel, Field, model_validator
+
+ShortLabel = Annotated[str, Field(min_length=1, max_length=100)]
 
 
 class AnalysisRunState(StrEnum):
@@ -41,10 +44,10 @@ class ClipInterval(BaseModel):
 class DetectedEvent(BaseModel):
     relative_start: float = Field(ge=0)
     relative_end: float = Field(ge=0)
-    actor: str = Field(min_length=1)
-    action: str = Field(min_length=1)
-    objects: list[str] = Field(default_factory=list)
-    evidence: str = Field(min_length=1)
+    actor: str = Field(min_length=1, max_length=100)
+    action: str = Field(min_length=1, max_length=160)
+    objects: list[ShortLabel] = Field(default_factory=list, max_length=10)
+    evidence: str = Field(min_length=1, max_length=300)
     confidence: float = Field(ge=0, le=1)
 
     @model_validator(mode="after")
@@ -56,18 +59,18 @@ class DetectedEvent(BaseModel):
 
 class SuggestedChapter(BaseModel):
     relative_start: float = Field(ge=0)
-    title: str = Field(min_length=1)
-    evidence: str = Field(min_length=1)
+    title: str = Field(min_length=1, max_length=160)
+    evidence: str = Field(min_length=1, max_length=300)
     confidence: float = Field(ge=0, le=1)
 
 
 class ClipAnalysis(BaseModel):
-    summary: str = Field(min_length=1)
-    participants: list[str] = Field(default_factory=list)
-    objects: list[str] = Field(default_factory=list)
-    events: list[DetectedEvent] = Field(default_factory=list)
-    suggested_chapters: list[SuggestedChapter] = Field(default_factory=list)
-    uncertainty: str | None = None
+    summary: str = Field(min_length=1, max_length=300)
+    participants: list[ShortLabel] = Field(default_factory=list, max_length=10)
+    objects: list[ShortLabel] = Field(default_factory=list, max_length=10)
+    events: list[DetectedEvent] = Field(default_factory=list, max_length=4)
+    suggested_chapters: list[SuggestedChapter] = Field(default_factory=list, max_length=4)
+    uncertainty: str | None = Field(default=None, max_length=300)
 
 
 class AnalysisClip(BaseModel):
@@ -113,9 +116,7 @@ class AnalysisRun(BaseModel):
     provider_name: str
     provider_version: str
     prompt_version: str
-    inference_parameters: dict[str, str | int | float | bool | None] = Field(
-        default_factory=dict
-    )
+    inference_parameters: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
     proxy_path: str | None = None
     error_code: str | None = None
     error_message: str | None = None

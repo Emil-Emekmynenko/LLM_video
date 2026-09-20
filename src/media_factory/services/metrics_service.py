@@ -54,9 +54,7 @@ class MetricsService:
             durations.setdefault(job.kind, []).append(
                 (job.finished_at - job.started_at).total_seconds()
             )
-        averages = {
-            kind: round(sum(values) / len(values), 3) for kind, values in durations.items()
-        }
+        averages = {kind: round(sum(values) / len(values), 3) for kind, values in durations.items()}
         try:
             queue_depth: int | None = self.queue.depth()
         except Exception:
@@ -125,9 +123,7 @@ class MetricsService:
         return "\n".join(lines) + "\n"
 
 
-def _group_counts(
-    session: Session, column: InstrumentedAttribute[Any]
-) -> dict[str, int]:
+def _group_counts(session: Session, column: InstrumentedAttribute[Any]) -> dict[str, int]:
     rows = session.execute(select(column, func.count()).group_by(column))
     return {str(value): int(count) for value, count in rows}
 
@@ -136,9 +132,7 @@ def _as_utc(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
-def _labelled(
-    lines: list[str], metric: str, label: str, values: Mapping[str, int | float]
-) -> None:
+def _labelled(lines: list[str], metric: str, label: str, values: Mapping[str, int | float]) -> None:
     for value, count in sorted(values.items()):
         safe_value = value.replace("\\", "\\\\").replace('"', '\\"')
         lines.append(f'{metric}{{{label}="{safe_value}"}} {count}')

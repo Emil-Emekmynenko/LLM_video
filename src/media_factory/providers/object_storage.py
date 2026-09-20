@@ -101,9 +101,7 @@ class FilesystemObjectStorageProvider:
             try:
                 os.link(temporary, destination)
             except FileExistsError as exc:
-                raise RemoteObjectAlreadyExists(
-                    f"remote key already exists: {key}"
-                ) from exc
+                raise RemoteObjectAlreadyExists(f"remote key already exists: {key}") from exc
         finally:
             temporary.unlink(missing_ok=True)
         return RemoteObject(

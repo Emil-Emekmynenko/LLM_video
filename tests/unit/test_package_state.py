@@ -19,4 +19,3 @@ def test_pipeline_cannot_skip_validation_and_delivery() -> None:
 def test_complete_is_terminal() -> None:
     with pytest.raises(InvalidPackageTransition):
         ensure_transition_allowed(PackageState.COMPLETE, PackageState.DRAFT)
-

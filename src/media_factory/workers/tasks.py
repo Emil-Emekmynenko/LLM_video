@@ -179,6 +179,10 @@ def _build_vlm_provider(settings: Settings) -> VideoUnderstandingProvider:
             max_retries=settings.qwen_max_retries,
             temperature=settings.qwen_temperature,
             max_tokens=settings.qwen_max_tokens,
+            media_mode=settings.qwen_media_mode,
+            frame_count=settings.qwen_frame_count,
+            frame_max_width=settings.qwen_frame_max_width,
+            ffmpeg_bin=settings.ffmpeg_bin,
         )
     raise RuntimeError(f"Unsupported VLM provider: {settings.vlm_provider}")
 

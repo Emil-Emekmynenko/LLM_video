@@ -37,8 +37,7 @@ def validate_transcript(
                         severity=Severity.ERROR,
                         path=path,
                         message=(
-                            "Слово имеет пустой текст, неверный порядок "
-                            "или недопустимые тайминги."
+                            "Слово имеет пустой текст, неверный порядок или недопустимые тайминги."
                         ),
                         blocking=True,
                     )

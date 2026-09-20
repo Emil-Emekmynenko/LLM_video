@@ -227,9 +227,7 @@ class DeliveryService:
         return result
 
     def _upload(self, delivery_id: str, files: list[DeliveryFile]) -> None:
-        recorded = {
-            item.remote_key: item for item in self.deliveries.list_objects(delivery_id)
-        }
+        recorded = {item.remote_key: item for item in self.deliveries.list_objects(delivery_id)}
         for item in files:
             existing = recorded.get(item.remote_key)
             if existing is not None:
@@ -247,9 +245,7 @@ class DeliveryService:
                     source_sha256=item.sha256,
                 )
 
-                def persist(
-                    value: TransferCheckpoint, *, current: DeliveryFile = item
-                ) -> None:
+                def persist(value: TransferCheckpoint, *, current: DeliveryFile = item) -> None:
                     self.deliveries.save_checkpoint(
                         delivery_attempt_id=delivery_id,
                         remote_key=current.remote_key,
@@ -298,9 +294,7 @@ class DeliveryService:
                 clear_callback()
 
     def _verify(self, delivery_id: str, files: list[DeliveryFile]) -> None:
-        records = {
-            item.remote_key: item for item in self.deliveries.list_objects(delivery_id)
-        }
+        records = {item.remote_key: item for item in self.deliveries.list_objects(delivery_id)}
         for item in files:
             record = records.get(item.remote_key)
             if record is None:
@@ -318,9 +312,7 @@ class DeliveryService:
             record.provider_checksum is not None
             and remote.provider_checksum != record.provider_checksum
         ):
-            raise RemoteVerificationError(
-                f"remote provider checksum changed: {item.remote_key}"
-            )
+            raise RemoteVerificationError(f"remote provider checksum changed: {item.remote_key}")
 
     @staticmethod
     def _verify_source(

@@ -337,9 +337,7 @@ class SQLAlchemyDeliveryRepository:
                     or row.source_size_bytes != source_size_bytes
                     or row.source_sha256 != source_sha256
                 ):
-                    raise DeliveryStateConflict(
-                        "upload checkpoint does not match delivery source"
-                    )
+                    raise DeliveryStateConflict("upload checkpoint does not match delivery source")
                 row.encrypted_session_token = cipher.encrypt(checkpoint.session_token)
                 row.next_offset = checkpoint.next_offset
                 row.completed_parts = checkpoint.completed_parts

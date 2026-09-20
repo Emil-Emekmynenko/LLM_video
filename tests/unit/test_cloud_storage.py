@@ -100,8 +100,7 @@ class FakeS3Client:
         body = b"".join(item[0] for item in ordered)
         digests = b"".join(base64.b64decode(item[1]) for item in ordered)
         checksum = (
-            base64.b64encode(hashlib.sha256(digests).digest()).decode("ascii")
-            + f"-{len(ordered)}"
+            base64.b64encode(hashlib.sha256(digests).digest()).decode("ascii") + f"-{len(ordered)}"
         )
         self.objects[key] = {
             "body": body,
@@ -213,9 +212,7 @@ class FakeGCSTransport:
         blob = self.client.value.blob(str(session["key"]), chunk_size=256 * 1024)
         blob.metadata = session["metadata"]
         blob.size = length
-        blob.crc32c = base64.b64encode(
-            hashlib.sha256(session["body"]).digest()[:4]
-        ).decode("ascii")
+        blob.crc32c = base64.b64encode(hashlib.sha256(session["body"]).digest()[:4]).decode("ascii")
         blob.exists = True
         return FakeResponse(200)
 

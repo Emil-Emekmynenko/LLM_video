@@ -191,9 +191,7 @@ async def request_security_audit(request: Request, call_next: Any) -> Any:
     else:
         principal = authenticate(Settings(auth_enabled=False), None)
 
-    token = set_request_context(
-        RequestContext(principal=principal, correlation_id=correlation_id)
-    )
+    token = set_request_context(RequestContext(principal=principal, correlation_id=correlation_id))
     response: Any = None
     try:
         response = await call_next(request)
@@ -269,7 +267,11 @@ def get_inspector(settings: Settings = Depends(get_settings)) -> FFprobeMediaIns
 @lru_cache(maxsize=1)
 def get_job_queue() -> RedisJobQueue:
     settings = get_settings()
-    return RedisJobQueue(settings.redis_url, settings.queue_name)
+    return RedisJobQueue(
+        settings.redis_url,
+        settings.queue_name,
+        job_timeout_seconds=settings.job_timeout_seconds,
+    )
 
 
 def get_ingest_service(
@@ -420,9 +422,7 @@ def get_transcription_service(
     settings: Settings = Depends(get_settings),
     database: Database = Depends(get_database),
     masters: SQLAlchemyMasterRepository = Depends(get_master_repository),
-    transcriptions: SQLAlchemyTranscriptionRepository = Depends(
-        get_transcription_repository
-    ),
+    transcriptions: SQLAlchemyTranscriptionRepository = Depends(get_transcription_repository),
 ) -> TranscriptionService:
     return TranscriptionService(
         packages=SQLAlchemyPackageRepository(database.session_factory),
@@ -667,6 +667,21 @@ def get_package(
 ) -> Package:
     try:
         return service.get(package_id)
+    except EntityNotFoundError as exc:
+        raise _not_found(exc) from exc
+
+
+@app.post(
+    "/api/v1/packages/{package_id}/reprocess",
+    response_model=Package,
+    status_code=status.HTTP_201_CREATED,
+)
+def reprocess_package(
+    package_id: str,
+    service: PackageService = Depends(get_package_service),
+) -> Package:
+    try:
+        return service.reprocess(package_id)
     except EntityNotFoundError as exc:
         raise _not_found(exc) from exc
 
@@ -1325,9 +1340,7 @@ def list_master_builds(
 )
 def list_transcription_runs(
     package_id: str,
-    repository: SQLAlchemyTranscriptionRepository = Depends(
-        get_transcription_repository
-    ),
+    repository: SQLAlchemyTranscriptionRepository = Depends(get_transcription_repository),
 ) -> list[TranscriptionRun]:
     return repository.list_for_package(package_id)
 
@@ -1338,9 +1351,7 @@ def list_transcription_runs(
 )
 def list_package_builds(
     package_id: str,
-    repository: SQLAlchemyPackageBuildRepository = Depends(
-        get_package_build_repository
-    ),
+    repository: SQLAlchemyPackageBuildRepository = Depends(get_package_build_repository),
 ) -> list[PackageBuild]:
     return repository.list_for_package(package_id)
 

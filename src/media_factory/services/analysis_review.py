@@ -55,9 +55,7 @@ class AnalysisReviewService:
                 if event.review_status not in {ReviewStatus.APPROVED, ReviewStatus.REJECTED}
             ]
             if unresolved:
-                raise AnalysisReviewError(
-                    f"analysis has {len(unresolved)} unresolved events"
-                )
+                raise AnalysisReviewError(f"analysis has {len(unresolved)} unresolved events")
             status = AnalysisReviewStatus.APPROVED
         else:
             status = AnalysisReviewStatus.REJECTED

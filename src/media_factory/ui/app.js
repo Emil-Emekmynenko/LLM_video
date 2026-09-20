@@ -84,6 +84,11 @@ function formatBytes(bytes) {
   return `${value.toFixed(unit ? 1 : 0)} ${units[unit]}`;
 }
 
+function truncateText(value, maxLength = 320) {
+  const text = String(value || "").trim();
+  return text.length <= maxLength ? text : `${text.slice(0, maxLength).trimEnd()}…`;
+}
+
 function toast(message, isError = false) {
   const target = $("#toast");
   target.textContent = message;
@@ -178,15 +183,18 @@ async function selectPackage(packageId, updateHash = true) {
   $("#package-detail").hidden = false;
   renderPackageShell(packageItem);
   try {
-    const [asset, jobs, runs, audit] = await Promise.all([
+    const [asset, jobs, runs, audit, transcripts, metadata] = await Promise.all([
       api(`/api/v1/assets/${packageItem.source_asset_id}`),
       api(`/api/v1/packages/${packageId}/jobs`),
       api(`/api/v1/packages/${packageId}/analysis-runs`),
-      api(`/api/v1/packages/${packageId}/audit-events?limit=50`)
+      api(`/api/v1/packages/${packageId}/audit-events?limit=50`),
+      api(`/api/v1/packages/${packageId}/transcription-runs`),
+      api(`/api/v1/packages/${packageId}/metadata`)
     ]);
+    const events = runs[0] ? await api(`/api/v1/analysis-runs/${runs[0].id}/events`) : [];
     if (appState.selectedId !== packageId) return;
     appState.assets.set(asset.id, asset);
-    renderPackageDetails(packageItem, asset, jobs, runs, audit);
+    renderPackageDetails(packageItem, asset, jobs, runs, audit, transcripts, metadata, events);
   } catch (error) {
     toast(`Ошибка карточки: ${error.message}`, true);
   }
@@ -217,13 +225,20 @@ function renderActions(item) {
   const action = actionFor(item);
   if (!action) {
     target.append(node("span", "muted", "На этом этапе нужна ручная проверка"));
-    return;
+  } else {
+    const button = node("button", "button button-primary", action.label);
+    button.type = "button";
+    button.disabled = appState.busy;
+    button.addEventListener("click", () => action.run(item));
+    target.append(button);
   }
-  const button = node("button", "button button-primary", action.label);
-  button.type = "button";
-  button.disabled = appState.busy;
-  button.addEventListener("click", () => action.run(item));
-  target.append(button);
+  if (!["uploaded", "inspecting"].includes(item.state)) {
+    const repeat = node("button", "button button-secondary", "Обработать заново");
+    repeat.type = "button";
+    repeat.disabled = appState.busy;
+    repeat.addEventListener("click", () => reprocessPackage(item));
+    target.append(repeat);
+  }
 }
 
 function actionFor(item) {
@@ -284,7 +299,16 @@ async function callWorkflow(item, endpoint) {
   });
 }
 
-function renderPackageDetails(item, asset, jobs, runs, audit) {
+async function reprocessPackage(item) {
+  await withBusy(async () => {
+    const created = await api(`/api/v1/packages/${item.id}/reprocess`, { method: "POST" });
+    appState.selectedId = created.id;
+    history.replaceState(null, "", `#${created.id}`);
+    toast("Создан новый прогон для того же видео");
+  });
+}
+
+function renderPackageDetails(item, asset, jobs, runs, audit, transcripts, metadata, events) {
   $("#detail-title").textContent = asset.original_name;
   const inspection = asset.inspection;
   const video = inspection?.streams?.find((stream) => stream.codec_type === "video");
@@ -302,6 +326,74 @@ function renderPackageDetails(item, asset, jobs, runs, audit) {
   renderJob(jobs[0]);
   renderHistory(jobs, runs);
   renderAudit(audit);
+  renderRecognitionResult(runs[0], transcripts.at(-1), metadata, events);
+}
+
+function renderRecognitionResult(run, transcription, metadataVersions, events) {
+  const card = $("#result-card");
+  const hasResult = Boolean(run || transcription || metadataVersions.length);
+  card.hidden = !hasResult;
+  if (!hasResult) return;
+
+  const approvedMetadata = [...metadataVersions].reverse().find((value) => value.status === "approved");
+  const latestMetadata = approvedMetadata || metadataVersions.at(-1);
+  const synthetic = Boolean(run?.inference_parameters?.synthetic || transcription?.parameters?.synthetic);
+  const badge = $("#result-badge");
+  badge.textContent = synthetic ? "Тестовые данные" : "Локальные модели";
+  badge.className = `badge ${synthetic ? "error" : "success"}`;
+
+  const visual = $("#visual-result");
+  visual.replaceChildren(node("h4", "", "Действия и описание"));
+  const provider = run ? `${run.provider_name} · ${run.provider_version}` : "Анализ ещё не запускался";
+  visual.append(node("p", "result-provider", provider));
+  if (latestMetadata) {
+    visual.append(node("h5", "result-title", latestMetadata.title));
+    visual.append(node("p", "result-copy", latestMetadata.description));
+  }
+  const visibleEvents = run?.review_status === "approved"
+    ? events.filter((event) => event.review_status === "approved")
+    : events.filter((event) => event.review_status !== "rejected");
+  if (visibleEvents.length) {
+    const list = node("div", "recognition-list");
+    visibleEvents.forEach((event) => {
+      const row = node("div", "recognition-row");
+      row.append(node("time", "", `${event.start.toFixed(1)}–${event.end.toFixed(1)} с`));
+      const copy = node("div");
+      copy.append(node("strong", "", `${event.actor}: ${event.action}`));
+      copy.append(node("span", "", truncateText(event.evidence.join(" ") || "Без evidence")));
+      row.append(copy);
+      list.append(row);
+    });
+    visual.append(list);
+  } else {
+    visual.append(node("p", "result-copy muted", "Распознанные действия появятся после анализа."));
+  }
+
+  const transcript = $("#transcript-result");
+  transcript.replaceChildren(node("h4", "", "Транскрипция речи"));
+  const transcriptProvider = transcription
+    ? `${transcription.provider_name} · ${transcription.model_name} · ${transcription.language || "язык не определён"}${
+        Number.isFinite(transcription.language_probability)
+          ? ` · уверенность ${(transcription.language_probability * 100).toFixed(0)}%`
+          : ""
+      }`
+    : "Транскрибация ещё не запускалась";
+  transcript.append(node("p", "result-provider", transcriptProvider));
+  if (transcription?.text) transcript.append(node("p", "transcript-copy", transcription.text));
+  if (transcription?.transcript?.segments?.length) {
+    const details = node("details", "transcript-details");
+    details.append(node("summary", "", `Сегменты и таймкоды · ${transcription.transcript.segments.length}`));
+    transcription.transcript.segments.forEach((segment) => {
+      const row = node("div", "transcript-segment");
+      row.append(node("time", "", `${segment.start.toFixed(2)}–${segment.end.toFixed(2)}`));
+      row.append(node("span", "", segment.text));
+      row.title = segment.words.map((word) => `${word.word} ${word.start.toFixed(2)}–${word.end.toFixed(2)}`).join(" · ");
+      details.append(row);
+    });
+    transcript.append(details);
+  } else {
+    transcript.append(node("p", "result-copy muted", "Текст появится после сборки master и запуска ASR."));
+  }
 }
 
 function renderJob(job) {

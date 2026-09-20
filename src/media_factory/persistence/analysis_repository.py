@@ -230,9 +230,7 @@ class SQLAlchemyAnalysisRepository:
             result = cast(
                 CursorResult[Any],
                 session.execute(
-                    update(AnalysisRunRow)
-                    .where(AnalysisRunRow.id == run_id)
-                    .values(**values)
+                    update(AnalysisRunRow).where(AnalysisRunRow.id == run_id).values(**values)
                 ),
             )
             if result.rowcount != 1:

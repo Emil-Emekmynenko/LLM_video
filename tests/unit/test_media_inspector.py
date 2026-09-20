@@ -51,4 +51,3 @@ def test_inspector_rejects_audio_only_file() -> None:
 
     with pytest.raises(InvalidMediaError, match="no video stream"):
         inspector.inspect(Path("audio.wav"))
-
